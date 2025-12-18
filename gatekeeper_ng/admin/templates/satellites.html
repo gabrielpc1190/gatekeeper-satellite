@@ -1,0 +1,243 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>Satellites & Room Positioning</h2>
+        <a href="/" class="btn btn-ghost">Back to Dashboard</a>
+    </div>
+
+    <div
+        style="background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; border-radius: 8px; padding: 1rem; margin-bottom: 2rem;">
+        <h4 style="margin: 0 0 0.5rem 0; color: #60a5fa;">Weighted Centroid Localization (WCL)</h4>
+        <p style="margin: 0; font-size: 0.9rem; color: var(--text-secondary);">
+            To enable precise tracking, set the X, Y coordinates (in meters) for each satellite relative to your floor
+            plan.
+            <br>
+            Use <b>Calibrate 1m</b> to learn the precise reference signal strength for each sensor.
+        </p>
+    </div>
+
+    <div style="background: rgba(0,0,0,0.2); border-radius: 8px; overflow: hidden;">
+        <form action="/satellites/update" method="post" id="updateForm">
+            <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                    <tr style="background: rgba(255,255,255,0.05); border-bottom: 1px solid var(--border);">
+                        <th style="padding: 1rem;">Satellite</th>
+                        <th style="padding: 1rem;">Room Name</th>
+                        <th style="padding: 1rem; width: 80px;">X (m)</th>
+                        <th style="padding: 1rem; width: 80px;">Y (m)</th>
+                        <th style="padding: 1rem; width: 100px;">Ref RSSI</th>
+                        <th style="padding: 1rem; text-align: right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if satellites %}
+                    {% for sat_id, info in satellites.items() %}
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <td style="padding: 1rem;">
+                            <div style="font-family: monospace; color: var(--accent); font-weight: 600;">{{ sat_id }}
+                            </div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Last seen: {{
+                                info.last_seen_fmt }}</div>
+                        </td>
+                        <td style="padding: 1rem;">
+                            <input type="text" name="room_{{ sat_id }}" value="{{ info.room }}"
+                                placeholder="e.g. Kitchen"
+                                style="width: 140px; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text-primary);">
+                        </td>
+                        <td style="padding: 1rem;">
+                            <input type="number" step="0.1" name="x_{{ sat_id }}" value="{{ info.x|default(0) }}"
+                                style="width: 60px; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text-primary); font-family: monospace;">
+                        </td>
+                        <td style="padding: 1rem;">
+                            <input type="number" step="0.1" name="y_{{ sat_id }}" value="{{ info.y|default(0) }}"
+                                style="width: 60px; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text-primary); font-family: monospace;">
+                        </td>
+                        <td style="padding: 1rem;">
+                            <input type="number" name="ref_{{ sat_id }}" value="{{ info.ref_rssi_1m|default(-59) }}"
+                                style="width: 60px; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text-secondary); font-family: monospace;"
+                                readonly>
+                        </td>
+                        <td style="padding: 1rem; text-align: right;">
+                            <button type="button" class="btn btn-ghost"
+                                style="font-size: 0.8rem; border: 1px solid var(--accent); color: var(--accent);"
+                                onclick="startCalibration('{{ sat_id }}')">
+                                ⚖️ Calibrate
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="6" style="text-align:center; padding: 3rem; color: var(--text-secondary);">
+                            No satellites online.
+                        </td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+
+            {% if satellites %}
+            <div
+                style="padding: 1rem; background: rgba(0,0,0,0.2); text-align: right; border-top: 1px solid var(--border);">
+                <button type="submit" class="btn btn-primary">Save Configuration</button>
+            </div>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+<!-- Calibration Modal -->
+<div id="calibModal"
+    style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; align-items: center; justify-content: center;">
+    <div class="card" style="width: 100%; max-width: 400px; text-align: center; position: relative;">
+        <h3 id="calibTitle">Calibrating...</h3>
+        <p id="calibDesc" style="color: var(--text-secondary); margin-bottom: 2rem;">
+            Place your phone exactly <b>1 meter</b> away from the satellite.
+        </p>
+
+        <div id="calibProgress" style="display: none; margin-bottom: 2rem;">
+            <div style="width: 100%; background: var(--border); height: 8px; border-radius: 4px; overflow: hidden;">
+                <div id="progressBar"
+                    style="width: 0%; background: var(--accent); height: 100%; transition: width 0.2s;"></div>
+            </div>
+            <div style="margin-top: 0.5rem; font-family: monospace; color: var(--accent);" id="rssiPreview">Waiting for
+                signal...</div>
+        </div>
+
+        <div id="calibActions">
+            <button class="btn btn-primary" onclick="runCalibration()">Start Diagnostic Sampling</button>
+            <button class="btn btn-ghost" onclick="closeCalib()" style="margin-left: 1rem;">Cancel</button>
+        </div>
+
+        <div id="calibInfo"
+            style="margin-top: 1.5rem; text-align: left; font-size: 0.75rem; color: var(--text-secondary); border-top: 1px solid var(--border); padding-top: 1rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <span style="color: var(--accent);">STABILITY:</span>
+                <span>Wait for Standard Deviation &lt; 2.0 dBm (min 15s).</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="color: var(--accent);">CLEANUP:</span>
+                <span>Automatic 10% trimmed mean removes signal outliers.</span>
+            </div>
+        </div>
+
+        <div id="calibResult" style="display: none;">
+            <div style="font-size: 2rem; font-weight: bold; color: var(--success); margin-bottom: 1rem;" id="finalRssi">
+                -00 dBm</div>
+            <p>Calibration Complete</p>
+            <form action="/satellites/update_ref" method="post">
+                <input type="hidden" name="satellite_id" id="calibSatId">
+                <input type="hidden" name="ref_rssi" id="calibVal">
+                <button type="submit" class="btn btn-primary">Save & Apply</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentSat = null;
+    let calibInterval = null;
+
+    function startCalibration(satId) {
+        currentSat = satId;
+        document.getElementById('calibTitle').innerText = `Calibrating ${satId}`;
+        document.getElementById('calibSatId').value = satId;
+        document.getElementById('calibModal').style.display = 'flex';
+        document.getElementById('calibActions').style.display = 'block';
+        document.getElementById('calibInfo').style.display = 'block';
+        document.getElementById('calibProgress').style.display = 'none';
+        document.getElementById('calibResult').style.display = 'none';
+    }
+
+    function closeCalib() {
+        document.getElementById('calibModal').style.display = 'none';
+        if (calibInterval) clearInterval(calibInterval);
+    }
+
+    function runCalibration() {
+        document.getElementById('calibActions').style.display = 'none';
+        document.getElementById('calibInfo').style.display = 'none';
+        document.getElementById('calibProgress').style.display = 'block';
+
+        let progress = 0;
+        let readings = [];
+
+        // Mock calibration for UI interaction flow (Backend implementation needed for real stream)
+        // In real impl, we would hit an API endpoint that starts collecting 
+        // For now, let's simulates interaction
+        fetch(`/satellites/calibrate?satellite=${currentSat}&action=start`)
+            .then(r => r.json())
+            .then(data => {
+                // The original code had a malformed line here.
+                // Assuming the intent was to start polling for status after initiating calibration.
+                // The provided snippet seems to be a replacement for the polling logic.
+                // Let's integrate the new logic as a polling function.
+
+                if (data.error) {
+                    alert(data.error);
+                    closeCalib(); // Assuming stopCalibration is equivalent to closeCalib for the UI
+                    return;
+                }
+
+                // Start polling for calibration status
+                pollStatus();
+            });
+    }
+
+    function pollStatus() {
+        fetch(`/satellites/calibrate?satellite=${currentSat}&action=status`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    closeCalib(); // Assuming stopCalibration is equivalent to closeCalib for the UI
+                    return;
+                }
+
+                const bar = document.getElementById('progressBar'); // Changed from calib-progress-bar to progressBar
+                const statusText = document.getElementById('rssiPreview'); // Re-using rssiPreview for status text
+                // The original HTML doesn't have calib-rssi-val or calib-avg-val,
+                // so we'll update rssiPreview with combined info.
+                // Also, no btn-save-ref, so we'll assume the save button in result is enabled by default.
+
+                bar.style.width = data.progress + '%';
+                bar.classList.remove('bg-primary', 'bg-success'); // Clean up existing classes
+                bar.classList.add('bg-accent'); // Default color
+
+                let statusMessage = `Live: ${data.last_rssi || '--'} dBm`;
+                if (data.avg_rssi) {
+                    statusMessage += ` (Avg: ${data.avg_rssi.toFixed(1)} dBm)`;
+                }
+
+                if (data.stable) {
+                    bar.style.background = 'var(--success)'; // Change bar color to success
+                    statusText.innerHTML = `✅ Signal Stable (${data.count} samples). Ready! ${statusMessage}`;
+                    // document.getElementById('btn-save-ref').disabled = false; // No such element in original HTML
+                } else {
+                    statusText.innerHTML = `Sampling... (${data.count} samples collected) ${statusMessage}`;
+                }
+
+                if (data.progress < 100) {
+                    setTimeout(pollStatus, 1000);
+                } else {
+                    // Calibration complete
+                    showResult(data.avg_rssi);
+                }
+            })
+            .catch(error => {
+                console.error('Error polling calibration status:', error);
+                alert('Failed to get calibration status.');
+                closeCalib();
+            });
+    }
+
+    function showResult(avg) {
+        document.getElementById('calibProgress').style.display = 'none';
+        document.getElementById('calibResult').style.display = 'block';
+        document.getElementById('finalRssi').innerText = Math.round(avg) + ' dBm';
+        document.getElementById('calibVal').value = Math.round(avg);
+    }
+</script>
+{% endblock %}

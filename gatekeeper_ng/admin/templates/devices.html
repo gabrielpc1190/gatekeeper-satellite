@@ -1,0 +1,220 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>Manage Devices</h2>
+        <div style="display: flex; gap: 0.5rem;">
+            <form action="/devices/announce" method="post"
+                onsubmit="return confirm('Publish devices to Home Assistant via MQTT Discovery?');">
+                <button type="submit" class="btn btn-primary" style="background-color: #0ea5e9;">📣 HA
+                    Discovery</button>
+            </form>
+            <a href="/" class="btn btn-ghost">Back to Dashboard</a>
+        </div>
+    </div>
+
+    <!-- Add Device Card -->
+    <div class="card" style="margin-bottom: 2rem; border-left: 4px solid var(--accent);">
+        <h3 style="margin-top: 0; font-size: 1.1rem; color: var(--accent);">Add New Device</h3>
+        <form action="/devices/add" method="post"
+            style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+
+            <div style="width: 150px;">
+                <label
+                    style="color: var(--text-secondary); font-size: 0.875rem; display: block; margin-bottom: 0.5rem;">Id
+                    Type</label>
+                <select name="identifier_type" id="new_id_type" onchange="togglePattern()"
+                    style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+                    <option value="mac">MAC Address</option>
+                    <option value="uuid">iBeacon UUID</option>
+                </select>
+            </div>
+
+            <div style="flex: 2; min-width: 250px;">
+                <label
+                    style="color: var(--text-secondary); font-size: 0.875rem; display: block; margin-bottom: 0.5rem;">Identifier
+                    (MAC or UUID)</label>
+                <input type="text" name="identifier" id="new_identifier" placeholder="XX:XX:XX:XX:XX:XX" required
+                    pattern="^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$"
+                    style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-family: monospace;">
+            </div>
+
+            <div style="flex: 1; min-width: 200px;">
+                <label
+                    style="color: var(--text-secondary); font-size: 0.875rem; display: block; margin-bottom: 0.5rem;">Friendly
+                    Name (Alias)</label>
+                <input type="text" name="alias" placeholder="e.g. My_iPhone" required
+                    style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+            </div>
+
+            <div style="width: 130px;">
+                <label
+                    style="color: var(--text-secondary); font-size: 0.875rem; display: block; margin-bottom: 0.5rem;">Device
+                    Category</label>
+                <select name="type"
+                    style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+                    <option value="Phone">Phone</option>
+                    <option value="Laptop">Laptop</option>
+                    <option value="Tablet">Tablet</option>
+                    <option value="Watch">Watch</option>
+                    <option value="Bluetooth">Other BLE</option>
+                </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="height: 42px;">Add Device</button>
+        </form>
+    </div>
+
+    <!-- Devices List -->
+    <div class="card">
+        <h3 style="margin-top: 0; font-size: 1.1rem;">Tracked Devices</h3>
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--border);">
+                        <th style="padding: 1rem 0.5rem; color: var(--text-secondary); width: 80px;">Type</th>
+                        <th style="padding: 1rem 0.5rem; color: var(--text-secondary);">Identifier (MAC / UUID)</th>
+                        <th style="padding: 1rem 0.5rem; color: var(--text-secondary);">Alias</th>
+                        <th style="padding: 1rem 0.5rem; color: var(--text-secondary);">Category</th>
+                        <th style="padding: 1rem 0.5rem; text-align: right; color: var(--text-secondary);">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if devices %}
+                    {% for device in devices %}
+                    {% set id_type = device.identifier_type if device.identifier_type else 'mac' %}
+                    {% set display_id = device.identifier if device.identifier else device.mac %}
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <td style="padding: 1rem 0.5rem;">
+                            {% if id_type == 'uuid' %}
+                            <span
+                                style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">UUID</span>
+                            {% else %}
+                            <span
+                                style="background: #6366f1; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">MAC</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 1rem 0.5rem; font-family: monospace; font-size: 0.9rem;"
+                            title="{{ display_id }}">
+                            {% if id_type == 'uuid' %}
+                            {{ display_id[:8] }}...{{ display_id[-8:] }}
+                            {% else %}
+                            {{ display_id }}
+                            {% endif %}
+                        </td>
+                        <td style="padding: 1rem 0.5rem; font-weight: 500;">{{ device.alias }}</td>
+                        <td style="padding: 1rem 0.5rem;">
+                            <span
+                                style="font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.1);">{{
+                                device.type }}</span>
+                        </td>
+                        <td style="padding: 1rem 0.5rem; text-align: right; white-space: nowrap;">
+                            <button class="btn btn-ghost"
+                                style="padding: 0.25rem 0.5rem; font-size: 0.875rem; margin-right: 0.5rem;"
+                                onclick="openEditModal('{{ display_id }}', '{{ id_type }}', '{{ device.alias }}', '{{ device.type }}')">
+                                Edit
+                            </button>
+                            <form action="/devices/delete" method="post" style="display: inline;"
+                                onsubmit="return confirm('Stop tracking {{ device.alias }}?');">
+                                <input type="hidden" name="identifier" value="{{ display_id }}">
+                                <button type="submit" class="btn"
+                                    style="color: #ef4444; background: transparent; padding: 0.25rem 0.5rem; font-size: 0.875rem;">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="5" style="padding: 3rem; text-align: center; color: var(--text-secondary);">
+                            No devices tracked yet. Add one above or via Bluetooth Tools.
+                        </td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div id="editModal"
+    style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
+    <div class="card" style="width: 100%; max-width: 550px; margin: 1rem; position: relative;">
+        <button onclick="closeEditModal()"
+            style="position: absolute; top: 1rem; right: 1rem; background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;">&times;</button>
+        <h3 style="margin-top: 0;">Edit Device</h3>
+        <form action="/devices/edit" method="post">
+            <input type="hidden" name="original_identifier" id="editOriginalId">
+            <input type="hidden" name="identifier_type" id="editIdType">
+
+            <div style="margin-bottom: 1rem;">
+                <label id="idLabel"
+                    style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Identifier</label>
+                <input type="text" name="identifier" id="editIdentifier" required
+                    style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-family: monospace;">
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Friendly Name
+                    (Alias)</label>
+                <input type="text" name="alias" id="editAlias" required
+                    style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+            </div>
+
+            <div style="margin-bottom: 1.5rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Category</label>
+                <select name="type" id="editType"
+                    style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+                    <option value="Phone">Phone</option>
+                    <option value="Laptop">Laptop</option>
+                    <option value="Tablet">Tablet</option>
+                    <option value="Watch">Watch</option>
+                    <option value="Bluetooth">Other BLE</option>
+                </select>
+            </div>
+
+            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                <button type="button" onclick="closeEditModal()" class="btn btn-ghost">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function togglePattern() {
+        const type = document.getElementById('new_id_type').value;
+        const input = document.getElementById('new_identifier');
+        if (type === 'mac') {
+            input.placeholder = "XX:XX:XX:XX:XX:XX";
+            input.pattern = "^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$";
+        } else {
+            input.placeholder = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
+            input.pattern = "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}";
+        }
+    }
+
+    function openEditModal(ident, type, alias, category) {
+        document.getElementById('editOriginalId').value = ident;
+        document.getElementById('editIdType').value = type;
+        document.getElementById('editIdentifier').value = ident;
+        document.getElementById('editAlias').value = alias;
+        document.getElementById('editType').value = category;
+
+        document.getElementById('idLabel').innerText = (type === 'mac' ? 'MAC Address' : 'iBeacon UUID');
+        const idInput = document.getElementById('editIdentifier');
+        if (type === 'mac') {
+            idInput.pattern = "^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$";
+        } else {
+            idInput.pattern = "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}";
+        }
+
+        document.getElementById('editModal').style.display = 'flex';
+    }
+
+    function closeEditModal() {
+        document.getElementById('editModal').style.display = 'none';
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,144 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>System Status</h2>
+        <span class="status-badge {{ 'status-active' if service_active else 'status-inactive' }}">
+            {{ 'Active' if service_active else 'Inactive' }}
+        </span>
+    </div>
+    <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <form action="/restart" method="post"
+            onsubmit="return confirm('Are you sure you want to restart the service?');">
+            <button type="submit" class="btn btn-primary">Restart Service</button>
+        </form>
+        <a href="/logs" class="btn btn-ghost">View Logs</a>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Tracked Devices</h2>
+    <div style="background: rgba(0,0,0,0.2); border-radius: 8px; overflow: hidden;">
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+                <tr style="background: rgba(255,255,255,0.05);">
+                    <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Alias</th>
+                    <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">MAC Address</th>
+                    <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Last Activity</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if devices %}
+                {% for device in devices %}
+                <tr>
+                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">{{ device.alias }}</td>
+                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border); font-family: monospace;">{{
+                        device.mac }}</td>
+                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">{{ device.last_seen }}</td>
+                </tr>
+                {% endfor %}
+                {% else %}
+                <tr>
+                    <td colspan="3" style="padding: 1rem; text-align: center; color: var(--text-secondary);">
+                        No devices configured in <a href="/edit/known_static_addresses"
+                            style="color: var(--accent);">known_static_addresses</a>
+                    </td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div style="display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 2rem;">
+
+    <!-- Devices Card -->
+    <a href="/devices" style="text-decoration: none;">
+        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid var(--accent);">
+            <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
+                <div style="background: rgba(59, 130, 246, 0.1); padding: 0.75rem; border-radius: 8px;">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                    </svg>
+                </div>
+                <h2 style="margin: 0; font-size: 1.25rem; color: var(--text-primary);">Devices</h2>
+            </div>
+            <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">Manage tracked MAC addresses and
+                aliases.</p>
+        </div>
+    </a>
+
+    <!-- Preferences Card -->
+    <a href="/preferences" style="text-decoration: none;">
+        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid #8b5cf6;">
+            <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
+                <div style="background: rgba(139, 92, 246, 0.1); padding: 0.75rem; border-radius: 8px; color: #8b5cf6;">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path
+                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z">
+                        </path>
+                        <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                </div>
+                <h2 style="margin: 0; font-size: 1.25rem; color: var(--text-primary);">Preferences</h2>
+            </div>
+            <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">Adjust scanning frequency and
+                timeouts.</p>
+        </div>
+    </a>
+
+    <!-- MQTT Card -->
+    <a href="/mqtt" style="text-decoration: none;">
+        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid #10b981;">
+            <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
+                <div style="background: rgba(16, 185, 129, 0.1); padding: 0.75rem; border-radius: 8px; color: #10b981;">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                </div>
+                <h2 style="margin: 0; font-size: 1.25rem; color: var(--text-primary);">MQTT</h2>
+            </div>
+            <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">Configure broker connection and
+                topics.</p>
+        </div>
+    </a>
+    <!-- Bluetooth Tools Card -->
+    <a href="/bluetooth" style="text-decoration: none;">
+        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid #3b82f6;">
+            <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
+                <div style="background: rgba(59, 130, 246, 0.1); padding: 0.75rem; border-radius: 8px; color: #3b82f6;">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M10 19l6-7-6-7v14zM16 12L10 5M10 19L16 12"></path>
+                        <path d="M7 12h10"></path>
+                    </svg>
+                </div>
+                <h2 style="margin: 0; font-size: 1.25rem; color: var(--text-primary);">Bluetooth</h2>
+            </div>
+            <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">Scan & pair devices.</p>
+        </div>
+    </a>
+
+    <!-- Satellites Card -->
+    <a href="/satellites" style="text-decoration: none;">
+        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid #f59e0b;">
+            <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
+                <div style="background: rgba(245, 158, 11, 0.1); padding: 0.75rem; border-radius: 8px; color: #f59e0b;">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3m0 0V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+                    </svg>
+                </div>
+                <h2 style="margin: 0; font-size: 1.25rem; color: var(--text-primary);">Satellites</h2>
+            </div>
+            <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">Manage rooms & multi-room sensors.</p>
+        </div>
+    </a>
+
+</div>
+
+<style>
+    .card:hover {
+        transform: translateY(-2px);
+    }
+</style>
+{% endblock %}

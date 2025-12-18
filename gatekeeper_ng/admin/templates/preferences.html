@@ -1,0 +1,106 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>System Behavior Preferences</h2>
+        <a href="/" class="btn btn-ghost">Back to Dashboard</a>
+    </div>
+
+    <form action="/preferences/save" method="post">
+        <div style="display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
+
+            <!-- Scanning Behavior -->
+            <div
+                style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border);">
+                <h3 style="margin-top: 0; font-size: 1rem; color: var(--accent);">Scanning Behavior</h3>
+
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-size: 0.8rem; margin-bottom: 0.5rem;">Inter-Scan Delay
+                        (Seconds)</label>
+                    <div style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 0.5rem;">Time to wait
+                        between scans when no triggers are active.</div>
+                    <input type="number" name="PREF_INTER_SCAN_DELAY"
+                        value="{{ prefs.get('PREF_INTER_SCAN_DELAY', '60') }}" required
+                        style="width: 100%; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary);">
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-size: 0.8rem; margin-bottom: 0.5rem;">Arrival Scan
+                        Attempts</label>
+                    <div style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 0.5rem;">Number of
+                        times to scan when arrival is triggered.</div>
+                    <input type="number" name="PREF_ARRIVAL_SCAN_ATTEMPTS"
+                        value="{{ prefs.get('PREF_ARRIVAL_SCAN_ATTEMPTS', '1') }}" required
+                        style="width: 100%; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary);">
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-size: 0.8rem; margin-bottom: 0.5rem;">Depart Scan
+                        Attempts</label>
+                    <div style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 0.5rem;">Number of
+                        times to scan to confirm departure.</div>
+                    <input type="number" name="PREF_DEPART_SCAN_ATTEMPTS"
+                        value="{{ prefs.get('PREF_DEPART_SCAN_ATTEMPTS', '2') }}" required
+                        style="width: 100%; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary);">
+                </div>
+            </div>
+
+            <!-- Presence Logic -->
+            <div
+                style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border);">
+                <h3 style="margin-top: 0; font-size: 1rem; color: var(--accent);">Presence Logic</h3>
+
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-size: 0.8rem; margin-bottom: 0.5rem;">Failure Tolerance</label>
+                    <div style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 0.5rem;">Consecutive
+                        failed scans before marking "Away". Increase to reduce false exits.</div>
+                    <input type="number" name="PREF_FAIL_OBSERVATION_TO_DEPART"
+                        value="{{ prefs.get('PREF_FAIL_OBSERVATION_TO_DEPART', '1') }}" required
+                        style="width: 100%; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary);">
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-size: 0.8rem; margin-bottom: 0.5rem;">Beacon Expiration
+                        (Seconds)</label>
+                    <div style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 0.5rem;">Time before a
+                        device is considered expired/away.</div>
+                    <input type="number" name="PREF_BEACON_EXPIRATION"
+                        value="{{ prefs.get('PREF_BEACON_EXPIRATION', '240') }}" required
+                        style="width: 100%; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary);">
+                </div>
+            </div>
+
+            <!-- Reporting & Logs -->
+            <div
+                style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border);">
+                <h3 style="margin-top: 0; font-size: 1rem; color: var(--accent);">Reporting</h3>
+
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="PREF_DEVICE_TRACKER_REPORT" value="true" {{ 'checked' if
+                            prefs.get('PREF_DEVICE_TRACKER_REPORT')=='true' else '' }}>
+                        <span>Report to Home Assistant (MQTT)</span>
+                    </label>
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="PREF_ENABLE_LOGGING" value="true" {{ 'checked' if
+                            prefs.get('PREF_ENABLE_LOGGING')=='true' else '' }}>
+                        <span>Enable File Logging (Debug)</span>
+                    </label>
+                    <div
+                        style="color: var(--text-secondary); font-size: 0.75rem; margin-left: 1.8rem; margin-top: 0.25rem;">
+                        Keep disabled to save SD card life.</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 2rem; display: flex; justify-content: flex-end; gap: 1rem;">
+            <a href="/" class="btn btn-ghost">Cancel</a>
+            <button type="submit" class="btn btn-primary">Save Preferences</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# ESPHome
+.esphome/
+secrets.yaml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gatekeeper Local Config (Templates included in repo)
+gatekeeper_ng/config/*.json
+
+# Trash / Logs
+*.log
+*.tar.gz
+DEPLOYMENT_LOG.md
+FLASH_LOG.md
+PROJECT_STATUS.md
+SYSTEM_OVERVIEW.md
+HUB_SENSOR_DIAGNOSIS.md
+BLUETOOTH_DIAGNOSIS.md
+walk_test*.log

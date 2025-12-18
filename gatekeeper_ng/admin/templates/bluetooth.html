@@ -1,0 +1,189 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>Bluetooth Scanner</h2>
+        <a href="/" class="btn btn-ghost">Back to Dashboard</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+        Discover nearby Bluetooth devices and iBeacon UUIDs detected by satellites.
+    </p>
+
+    <!-- Filter Controls -->
+    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap;">
+        <button class="btn btn-primary" id="scanBtn" onclick="startScanAJAX()">
+            Start Scan (Satellites + Local)
+        </button>
+
+        <label
+            style="display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.05); padding: 0.5rem 1rem; border-radius: 4px;">
+            <input type="checkbox" id="filterIBeacon" checked onchange="applyFilters()">
+            <span>Show iBeacons (UUID)</span>
+        </label>
+
+        <label
+            style="display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.05); padding: 0.5rem 1rem; border-radius: 4px;">
+            <input type="checkbox" id="filterBLE" checked onchange="applyFilters()">
+            <span>Show BLE (MAC)</span>
+        </label>
+
+        <label
+            style="display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.05); padding: 0.5rem 1rem; border-radius: 4px;">
+            <input type="checkbox" id="hideTracked" onchange="applyFilters()">
+            <span>Hide Already Tracked</span>
+        </label>
+    </div>
+
+    <script>
+        let allDevices = [];
+
+        function startScanAJAX() {
+            const btn = document.getElementById('scanBtn');
+            const tbody = document.getElementById('scanResultsBody');
+
+            btn.style.backgroundColor = '#10b981';
+            btn.disabled = true;
+            btn.innerText = 'Scanning...';
+
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 2rem; color: var(--text-secondary);">Scanning for devices...</td></tr>';
+
+            fetch('/bluetooth/scan', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Scan Error: ' + data.error);
+                        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 1rem; color: red;">Error: ${data.error}</td></tr>`;
+                        return;
+                    }
+
+                    allDevices = data.results || [];
+                    renderDevices();
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('Request failed' + err);
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 1rem; color: red;">Request failed</td></tr>';
+                })
+                .finally(() => {
+                    btn.innerText = 'Start Scan (Satellites + Local)';
+                    btn.style.backgroundColor = '';
+                    btn.disabled = false;
+                });
+        }
+
+        function applyFilters() {
+            renderDevices();
+        }
+
+        function renderDevices() {
+            const tbody = document.getElementById('scanResultsBody');
+            const showIBeacon = document.getElementById('filterIBeacon').checked;
+            const showBLE = document.getElementById('filterBLE').checked;
+            const hideTracked = document.getElementById('hideTracked').checked;
+
+            const filtered = allDevices.filter(device => {
+                if (!showIBeacon && device.type === 'ibeacon') return false;
+                if (!showBLE && device.type === 'ble') return false;
+                if (hideTracked && device.tracked) return false;
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 2rem; color: var(--text-secondary);">No devices found with current filters.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = '';
+            filtered.forEach(device => {
+                const typeBadge = device.type === 'ibeacon' ?
+                    '<span style="background: #10b981; color: white; padding: 3px 10px; border-radius: 4px; font-size: 0.85em; font-weight: 500;">iBeacon</span>' :
+                    '<span style="background: #6366f1; color: white; padding: 3px 10px; border-radius: 4px; font-size: 0.85em; font-weight: 500;">BLE</span>';
+
+                const statusBadge = device.tracked ?
+                    '<span class="badge badge-success">✓ Tracked</span>' :
+                    '<span class="badge badge-warning">Not Tracked</span>';
+
+                const identifier = device.type === 'ibeacon' ? device.uuid_short : device.mac;
+                const identifierFull = device.type === 'ibeacon' ? device.uuid_full : device.mac;
+
+                const displayName = device.type === 'ibeacon'
+                    ? `iBeacon ${device.major || '?'}/${device.minor || '?'}`
+                    : (device.name || 'Unknown');
+
+                let actionCell = '';
+                if (!device.tracked) {
+                    if (device.type === 'ibeacon') {
+                        // Increased button visibility for iBeacons
+                        actionCell = `
+                        <form action="/devices/add" method="post" style="margin:0; display:flex; gap:0.5rem; align-items:center;">
+                            <input type="hidden" name="identifier" value="${identifierFull}">
+                            <input type="hidden" name="identifier_type" value="uuid">
+                            <input type="text" name="alias" placeholder="Enter friendly name..." required 
+                                   style="padding:8px 12px; border:1px solid #444; background:#222; color:white; border-radius:4px; flex:1; min-width: 150px;">
+                            <button type="submit" class="btn" style="background-color: var(--primary); color: white; font-weight: bold; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; white-space: nowrap;">
+                                ✚ SAVE & TRACK
+                            </button>
+                        </form>`;
+                    } else {
+                        actionCell = `
+                        <form action="/devices/add" method="post" style="margin:0;">
+                            <input type="hidden" name="identifier" value="${device.mac}">
+                            <input type="hidden" name="identifier_type" value="mac">
+                            <input type="hidden" name="alias" value="${device.name.replace(/\s+/g, '_')}">
+                            <button type="submit" class="btn-sm btn-primary">Add to Tracker</button>
+                        </form>`;
+                    }
+                } else {
+                    actionCell = '<span style="color: #888; font-style: italic;">Already tracking</span>';
+                }
+
+                const row = `
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 1rem;">${typeBadge}</td>
+                    <td style="padding: 1rem; font-family: monospace; font-size: 0.9em;" title="${identifierFull}">${identifier}</td>
+                    <td style="padding: 1rem;">${displayName}</td>
+                    <td style="padding: 1rem;">${device.rssi} dBm</td>
+                    <td style="padding: 1rem;">${statusBadge}</td>
+                    <td style="padding: 1rem;">${actionCell}</td>
+                </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+        }
+    </script>
+
+    <div style="background: rgba(0,0,0,0.2); border-radius: 8px; overflow: hidden; overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+                <tr style="background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <th style="padding: 1rem;">Type</th>
+                    <th style="padding: 1rem;">Identifier</th>
+                    <th style="padding: 1rem;">Name / Info</th>
+                    <th style="padding: 1rem;">RSSI</th>
+                    <th style="padding: 1rem;">Status</th>
+                    <th style="padding: 1rem; min-width: 300px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="scanResultsBody">
+                <tr>
+                    <td colspan="6" style="text-align:center; padding: 2rem; color: var(--text-secondary);">
+                        Click "Start Scan" to discover devices.
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div
+        style="margin-top: 2rem; padding: 1rem; background: rgba(100,149,237,0.1); border-radius: 8px; border-left: 4px solid #6495ed;">
+        <h4 style="margin: 0 0 0.5rem 0; color: #6495ed;">ℹ️ How It Works</h4>
+        <ul style="margin: 0; padding-left: 1.5rem; color: var(--text-secondary);">
+            <li><strong>iBeacons (UUID)</strong>: Detected by satellites. Enable iBeacon in Home Assistant app. Enter a
+                custom name and click <strong>SAVE & TRACK</strong>.</li>
+            <li><strong>BLE (MAC)</strong>: Detected by local scanner. Uses device's broadcast name.</li>
+            <li><strong>Tracked Status</strong>: Shows if device is already being tracked by Gatekeeper.</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}
