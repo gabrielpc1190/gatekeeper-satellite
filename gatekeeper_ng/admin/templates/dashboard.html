@@ -25,6 +25,8 @@
                 <tr style="background: rgba(255,255,255,0.05);">
                     <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Alias</th>
                     <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">MAC Address</th>
+                    <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Room</th>
+                    <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Distance</th>
                     <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Last Activity</th>
                 </tr>
             </thead>
@@ -33,14 +35,27 @@
                 {% for device in devices %}
                 <tr>
                     <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">{{ device.alias }}</td>
-                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border); font-family: monospace;">{{
-                        device.mac }}</td>
-                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">{{ device.last_seen }}</td>
+                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border); font-family: monospace;">{{ device.mac }}</td>
+                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">
+                        {% if device.present %}
+                            <span class="status-badge status-active">{{ device.room|default('Unknown') }}</span>
+                        {% else %}
+                            <span class="status-badge status-inactive">Away</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">
+                        {% if device.distance and device.distance > 0 %}
+                            {{ device.distance }}m
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">{{ device.last_seen_fmt|default(device.last_seen) }}</td>
                 </tr>
                 {% endfor %}
                 {% else %}
                 <tr>
-                    <td colspan="3" style="padding: 1rem; text-align: center; color: var(--text-secondary);">
+                    <td colspan="5" style="padding: 1rem; text-align: center; color: var(--text-secondary);">
                         No devices configured in <a href="/edit/known_static_addresses"
                             style="color: var(--accent);">known_static_addresses</a>
                     </td>

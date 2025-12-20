@@ -1,7 +1,7 @@
 import time
 import logging
 import asyncio
-from .signal_proc import SignalBuffer
+from .signal_proc import SignalBuffer, calculate_distance
 
 class DeviceTracker:
     def __init__(self, config_mgr, mqtt_client):
@@ -16,34 +16,32 @@ class DeviceTracker:
         # identifier -> {
         #    'present': bool,
         #    'last_seen': float,
-        #    'room': str, (Stable Room)
-        #    'rssi': int, (Smoothed RSSI of current room)
+        #    'room': str, 
+        #    'rssi': int,
+        #    'distance': float,  
         #    'sources': { 
-        #         'sat_id': {'raw_rssi': int, 'smooth_rssi': float, 'last_seen': float, 'room_name': str} 
+        #         'sat_id': {'raw_rssi': int, 'smooth_rssi': float, 'distance': float, 'last_seen': float, 'room_name': str} 
         #    }
         # }
         
         # Signal Buffers
-        # Key: (satellite_id, identifier) -> SignalBuffer
         self.signal_buffers = {}
         
-        # Zoning State (for Debounce/Hysteresis)
+        # Zoning State 
         self.zoning_state = {} 
-        # identifier -> { 'pending_room': str, 'pending_start': float }
         
         # iBeacon Cache for UI
         self.recent_ibeacons = {}
         
-        # Calibration helper: Stores {sat_id: {'rssi': int, 'time': float}}
-        # This tracks the strongest signal seen by each satellite to aid calibration.
+        # Calibration helper
         self.last_sat_signals = {}
         
         # Config
         self.timeout_interval = 45 
         self.min_rssi = -100 
-        self.hysteresis_db = 3.0 # dB required to switch
-        self.debounce_time = 3.0 # Seconds to hold new winner
-        self.absence_timeout = 15.0 # Seconds before dropping a satellite source
+        self.hysteresis_db = 3.0 
+        self.debounce_time = 3.0 
+        self.absence_timeout = 15.0 
         
         self.reload_config()
 
@@ -62,13 +60,11 @@ class DeviceTracker:
         self.logger.info(f"Loaded {len(self.known_devices)} known devices.")
 
     async def process_remote_packet(self, satellite_id, identifier, rssi, extra_data=None):
-        # 1. Update Calibration Cache: Keep track of the strongest signal THIS satellite sees
-        # We do this FIRST so calibration works even with unknown devices nearby
+        # 1. Update Calibration Cache
         now = time.time()
         if satellite_id not in self.last_sat_signals or (now - self.last_sat_signals[satellite_id]['time']) > 2:
             self.last_sat_signals[satellite_id] = {'rssi': rssi, 'time': now}
         else:
-            # Within a small window, keep the max
             if rssi > self.last_sat_signals[satellite_id]['rssi']:
                 self.last_sat_signals[satellite_id] = {'rssi': rssi, 'time': now}
 
@@ -76,7 +72,7 @@ class DeviceTracker:
         if extra_data and ('-' in identifier and len(identifier) == 36):
             self._update_ibeacon_cache(satellite_id, identifier, rssi, extra_data)
             
-        # 3. Manage Satellite Registration (Race-safe via ConfigMgr lock)
+        # 3. Manage Satellite Registration 
         await self._check_satellite_registration(satellite_id)
         
         # 4. Filter Unknown Devices
@@ -85,7 +81,7 @@ class DeviceTracker:
 
         # 5. Initialize State
         if identifier not in self.current_state:
-            self.current_state[identifier] = {'present': False, 'sources': {}, 'room': 'unknown', 'rssi': -100, 'last_seen': 0}
+            self.current_state[identifier] = {'present': False, 'sources': {}, 'room': 'unknown', 'rssi': -100, 'distance': -1, 'last_seen': 0}
             
         # 6. Signal Processing Pipeline
         buf_key = (satellite_id, identifier)
@@ -94,10 +90,15 @@ class DeviceTracker:
         
         smooth_rssi = self.signal_buffers[buf_key].add_sample(rssi)
         
-        # Apply Calibration
+        # Apply Calibration & Distance
         sats = self.config_mgr.load_satellites()
         sat_info = sats.get(satellite_id, {})
         measured_ref = sat_info.get('ref_rssi_1m', -59)
+        
+        # Distance calculation
+        dist = calculate_distance(smooth_rssi, tx_power=measured_ref)
+        
+        # Offset (Legacy approach, kept for RSSI normalization if needed, but distance is better)
         offset = measured_ref - (-59)
         normalized_rssi = smooth_rssi - offset
         
@@ -110,6 +111,7 @@ class DeviceTracker:
         state['sources'][satellite_id] = {
             'raw_rssi': rssi,
             'smooth_rssi': normalized_rssi,
+            'distance': dist,
             'last_seen': now,
             'room_name': actual_room
         }
@@ -132,18 +134,23 @@ class DeviceTracker:
                     best_sat = sat
         
         if not best_sat: return
-
-        candidate_room = state['sources'][best_sat]['room_name']
+        
+        candidate_source = state['sources'][best_sat]
+        candidate_room = candidate_source['room_name']
+        candidate_dist = candidate_source['distance']
+        
         current_room = state.get('room', 'unknown')
         
         if identifier not in self.zoning_state:
             self.zoning_state[identifier] = {'pending_room': None, 'start': 0}
         z_state = self.zoning_state[identifier]
         
+        # Immediate switch if unknown
         if current_room in ['unknown', 'Unassigned'] and candidate_room != 'Unassigned':
-             await self._change_room(identifier, candidate_room, best_rssi)
+             await self._change_room(identifier, candidate_room, best_rssi, candidate_dist)
              return
-
+        
+        # Find current room strength
         current_room_rssi = -999
         for sat, data in state['sources'].items():
             if (now - data['last_seen']) < self.absence_timeout:
@@ -152,13 +159,14 @@ class DeviceTracker:
                         current_room_rssi = data['smooth_rssi']
         
         if current_room_rssi == -999:
-             await self._change_room(identifier, candidate_room, best_rssi)
+             await self._change_room(identifier, candidate_room, best_rssi, candidate_dist)
              return
              
+        # Hysteresis Check
         if best_rssi > (current_room_rssi + self.hysteresis_db):
             if z_state['pending_room'] == candidate_room:
                 if (now - z_state['start']) >= self.debounce_time:
-                    await self._change_room(identifier, candidate_room, best_rssi)
+                    await self._change_room(identifier, candidate_room, best_rssi, candidate_dist)
                     z_state['pending_room'] = None
             else:
                 z_state['pending_room'] = candidate_room
@@ -169,16 +177,27 @@ class DeviceTracker:
         if state['room'] == current_room:
             old_rssi = state.get('rssi', -100)
             state['rssi'] = current_room_rssi
+            # Update distance for current room based on best sat in that room
+            # (Simple approximation: use best sat's distance)
+            # Better: recalculate best sat for current room
+            best_curr_dist = -1
+            for sat, data in state['sources'].items():
+                 if data['room_name'] == current_room and data['smooth_rssi'] == current_room_rssi:
+                     best_curr_dist = data['distance']
+                     break
+            state['distance'] = best_curr_dist
+            
             if abs(old_rssi - current_room_rssi) > 2.0 or (now - state.get('last_pub', 0)) > 30:
                 await self.publish_update(identifier)
 
-    async def _change_room(self, identifier, new_room, new_rssi):
+    async def _change_room(self, identifier, new_room, new_rssi, new_dist):
         state = self.current_state[identifier]
         old_room = state.get('room', 'unknown')
         state['room'] = new_room
         state['rssi'] = new_rssi
+        state['distance'] = new_dist
         state['present'] = True
-        self.logger.info(f"ZONE CHANGE: {identifier} {old_room} -> {new_room} (RSSI: {new_rssi:.1f})")
+        self.logger.info(f"ZONE CHANGE: {identifier} {old_room} -> {new_room} (RSSI: {new_rssi:.1f}, Dist: {new_dist}m)")
         await self.publish_update(identifier)
 
     def _update_ibeacon_cache(self, satellite_id, identifier, rssi, extra_data):
@@ -211,6 +230,7 @@ class DeviceTracker:
         state['last_pub'] = time.time()
         extra = {
             "room": state.get('room', 'unknown'),
+            "distance": state.get('distance', -1),
             "raw_sources": {k: int(v['raw_rssi']) for k, v in state.get('sources', {}).items()}
         }
         await self.mqtt_client.publish_presence(conf, state['present'], int(state.get('rssi', -100)), attributes=extra)
@@ -226,14 +246,15 @@ class DeviceTracker:
                     self.logger.info(f"DEPARTURE: {dev['alias']}")
                     state['present'] = False
                     state['room'] = 'not_home'
+                    state['distance'] = -1
                     await self.publish_update(identifier)
                     continue
                 current_room = state.get('room')
                 room_alive = False
                 for sat, data in state['sources'].items():
                      if data['room_name'] == current_room and (now - data['last_seen']) < self.absence_timeout:
-                         room_alive = True
-                         break
+                          room_alive = True
+                          break
                 if not room_alive and state['present']:
                     await self._evaluate_zone(identifier)
 

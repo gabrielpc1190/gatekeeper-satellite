@@ -6,9 +6,6 @@ from .config_mgr import ConfigManager
 from .mqtt_client import MQTTClient
 from .tracker import DeviceTracker
 # Import Admin (Relative import based on package structure)
-# We need to make sure 'admin' is importable. Path structure: gatekeeper_ng/admin/server.py
-# From app/core.py, admin is sibling package ..admin.server
-# But sys.path includes root.
 from admin.server import WebAdmin
 
 class CoreService:
@@ -59,23 +56,28 @@ class CoreService:
             # Start Scanner Loop
             scanner_task = asyncio.create_task(self.scanner.scan_loop())
             
+            # Application Main Loop
             while self.running:
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             self.logger.info("Service stopping...")
         finally:
             self.running = False
+            # Clean Shutdown
             maintenance_task.cancel()
             scanner_task.cancel()
+            self.mqtt_client.stop()
+            self.logger.info("Service Stopped.")
             
     def stop(self):
         self.running = False
         self.scanner.scanning = False
 
 async def main_entry(base_path, legacy_path):
-    # Setup Logging
+    # Setup Logging with more detailed format
     logging.basicConfig(level=logging.INFO, 
-                        format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+                        format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+                        datefmt='%Y-%m-%d %H:%M:%S')
     
     service = CoreService(base_path, legacy_path)
     
@@ -91,6 +93,4 @@ async def main_entry(base_path, legacy_path):
         loop.add_signal_handler(sig, signal_handler)
         
     # Run
-    # We run the service task.
-    # scan_loop is blocking-ish (it has a while loop), so just awaiting run() works.
     await service.run()

@@ -2,8 +2,13 @@ import json
 import os
 import shutil
 import logging
+import threading
 
 class ConfigManager:
+    """
+    Manages loading and saving of configuration files with atomic writes
+    to prevent data corruption.
+    """
     def __init__(self, base_path, legacy_path=None):
         self.base_path = base_path
         self.config_dir = os.path.join(base_path, 'config')
@@ -11,17 +16,34 @@ class ConfigManager:
         self.logger = logging.getLogger("ConfigMgr")
         
         # Thread safety lock for file operations
-        import threading
         self.lock = threading.Lock()
         
         # Ensure config dir exists
         os.makedirs(self.config_dir, exist_ok=True)
         
         self.devices_file = os.path.join(self.config_dir, 'devices.json')
-        self.devices_file = os.path.join(self.config_dir, 'devices.json')
         self.mqtt_file = os.path.join(self.config_dir, 'mqtt.json')
         self.settings_file = os.path.join(self.config_dir, 'settings.json')
         self.satellites_file = os.path.join(self.config_dir, 'satellites.json')
+
+    def _atomic_write(self, filepath, data):
+        """Helper to write data to a file atomically."""
+        tmp_path = filepath + ".tmp"
+        try:
+            with self.lock:
+                with open(tmp_path, 'w') as f:
+                    json.dump(data, f, indent=4)
+                    f.flush()
+                    os.fsync(f.fileno()) # Ensure write to disk
+                
+                # Atomic rename
+                os.replace(tmp_path, filepath)
+        except Exception as e:
+            self.logger.error(f"Error saving {filepath}: {e}")
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except: pass
         
     def load_devices(self):
         if not os.path.exists(self.devices_file) and self.legacy_path:
@@ -31,22 +53,22 @@ class ConfigManager:
             try:
                 with self.lock:
                     with open(self.devices_file, 'r') as f:
-                        return json.load(f)
+                        devices = json.load(f)
+                        # Normalize MACs on load
+                        for d in devices:
+                            if d.get('identifier_type') == 'mac' or 'mac' in d:
+                                if 'identifier' in d: d['identifier'] = d['identifier'].upper()
+                                elif 'mac' in d: d['mac'] = d['mac'].upper()
+                        return devices
             except Exception as e:
                 self.logger.error(f"Error loading devices.json: {e}")
                 return []
         return []
 
     def save_devices(self, devices):
-        try:
-            with self.lock:
-                with open(self.devices_file, 'w') as f:
-                    json.dump(devices, f, indent=4)
-        except Exception as e:
-            self.logger.error(f"Error saving devices.json: {e}")
+        self._atomic_write(self.devices_file, devices)
 
     def load_mqtt(self):
-        # Default MQTT config
         defaults = {
             "broker": "localhost",
             "port": 1883,
@@ -54,10 +76,8 @@ class ConfigManager:
             "password": "",
             "topic_prefix": "gatekeeper"
         }
-        
         if not os.path.exists(self.mqtt_file) and self.legacy_path:
             self._migrate_mqtt()
-            
         if os.path.exists(self.mqtt_file):
             try:
                 with open(self.mqtt_file, 'r') as f:
@@ -66,7 +86,6 @@ class ConfigManager:
                     return defaults
             except Exception as e:
                 self.logger.error(f"Error loading mqtt.json: {e}")
-                
         return defaults
 
     def load_settings(self):
@@ -75,7 +94,7 @@ class ConfigManager:
             "PREF_ARRIVAL_SCAN_ATTEMPTS": "1",
             "PREF_DEPART_SCAN_ATTEMPTS": "2",
             "PREF_FAIL_OBSERVATION_TO_DEPART": "1",
-            "PREF_BEACON_EXPIRATION": "60", # Default 60s
+            "PREF_BEACON_EXPIRATION": "60",
             "PREF_DEVICE_TRACKER_REPORT": "true",
             "PREF_ENABLE_LOGGING": "false"
         }
@@ -88,17 +107,9 @@ class ConfigManager:
         return defaults
 
     def save_settings(self, settings):
-        try:
-            with open(self.settings_file, 'w') as f:
-                json.dump(settings, f, indent=4)
-        except Exception as e:
-            self.logger.error(f"Error saving settings.json: {e}")
-
-        except Exception as e:
-            self.logger.error(f"Error saving settings.json: {e}")
+        self._atomic_write(self.settings_file, settings)
 
     def load_satellites(self):
-        # Returns id -> {room, name...}
         if os.path.exists(self.satellites_file):
             try:
                 with self.lock:
@@ -109,60 +120,39 @@ class ConfigManager:
         return {}
 
     def save_satellites(self, data):
-        try:
-            with self.lock:
-                with open(self.satellites_file, 'w') as f:
-                    json.dump(data, f, indent=4)
-        except Exception as e:
-            self.logger.error(f"Error saving satellites.json: {e}")
+        self._atomic_write(self.satellites_file, data)
 
     def _migrate_devices(self):
         legacy_file = os.path.join(self.legacy_path, 'monitor', 'known_static_addresses')
-        if not os.path.exists(legacy_file):
-            return
-            
+        if not os.path.exists(legacy_file): return
         self.logger.info(f"Migrating devices from {legacy_file}")
         devices = []
         try:
             with open(legacy_file, 'r') as f:
                 for line in f:
                     line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                        
-                    # Parse: MAC ALIAS # TYPE
+                    if not line or line.startswith('#'): continue
                     parts = line.split('#', 1)
                     main_part = parts[0].strip().split()
-                    
                     if len(main_part) >= 1:
                         mac = main_part[0].upper()
                         alias = main_part[1] if len(main_part) > 1 else mac
                         dev_type = parts[1].strip() if len(parts) > 1 else 'Bluetooth'
-                        
-                        devices.append({
-                            'mac': mac,
-                            'alias': alias,
-                            'type': dev_type
-                        })
-            
+                        devices.append({'mac': mac, 'alias': alias, 'type': dev_type})
             self.save_devices(devices)
-            
         except Exception as e:
             self.logger.error(f"Migration failed: {e}")
 
     def _migrate_mqtt(self):
         legacy_file = os.path.join(self.legacy_path, 'monitor', 'mqtt_preferences')
-        if not os.path.exists(legacy_file):
-            return
-            
+        if not os.path.exists(legacy_file): return
         self.logger.info(f"Migrating MQTT from {legacy_file}")
         config = {}
         try:
             with open(legacy_file, 'r') as f:
                 for line in f:
                     line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
+                    if not line or line.startswith('#'): continue
                     if '=' in line:
                         k, v = line.split('=', 1)
                         if k.strip() == 'mqtt_address': config['broker'] = v.strip()
@@ -171,8 +161,7 @@ class ConfigManager:
                         if k.strip() == 'mqtt_password': config['password'] = v.strip()
                         if k.strip() == 'mqtt_topicpath': config['topic_prefix'] = v.strip()
             
-            with open(self.mqtt_file, 'w') as f:
-                json.dump(config, f, indent=4)
-                
+            # Atomic write for wrapper
+            self._atomic_write(self.mqtt_file, config)
         except Exception as e:
             self.logger.error(f"Migration failed: {e}")

@@ -1,5 +1,6 @@
 import statistics
 import logging
+import math
 
 class SignalBuffer:
     def __init__(self, median_window=7, ema_alpha=0.2):
@@ -38,3 +39,23 @@ class SignalBuffer:
     def clear(self):
         self.history = []
         self.ema_value = None
+
+def calculate_distance(rssi, tx_power=-59, n=2.5):
+    """
+    Estimates distance using Log-Distance Path Loss Model.
+    d = 10 ^ ((TxPower - RSSI) / (10 * n))
+    
+    :param rssi: Received Signal Strength Indication (smoothed)
+    :param tx_power: RSSI at 1 meter (default -59 dBm)
+    :param n: Path loss exponent (2.0=free space, 2.5-3.0=typical indoor)
+    :return: Estimated distance in meters
+    """
+    if rssi == 0:
+        return -1.0
+        
+    try:
+        ratio = (tx_power - rssi) / (10 * n)
+        distance = math.pow(10, ratio)
+        return round(distance, 2)
+    except Exception:
+        return -1.0

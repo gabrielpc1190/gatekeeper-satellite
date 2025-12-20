@@ -5,8 +5,6 @@ import json
 import threading
 
 # We import ConfigManager from app to reuse logic
-# Assuming this runs from main.py which sets up path, or relative import if package
-# We will run this INSIDE the main python process as a thread
 from app.config_mgr import ConfigManager
 
 class WebAdmin:
@@ -22,6 +20,7 @@ class WebAdmin:
 
         # Register Routes
         self.app.add_url_rule('/', 'dashboard', self.dashboard)
+        self.app.add_url_rule('/health', 'health', self.health)
         self.app.add_url_rule('/devices', 'manage_devices', self.manage_devices)
         self.app.add_url_rule('/devices/add', 'add_device', self.add_device, methods=['POST'])
         self.app.add_url_rule('/devices/edit', 'edit_device', self.edit_device, methods=['POST'])
@@ -54,6 +53,9 @@ class WebAdmin:
         
     # --- ROUTES ---
 
+    def health(self):
+        return json.dumps({"status": "ok"})
+
     def dashboard(self):
         devices = self.config_mgr.load_devices()
         
@@ -71,10 +73,23 @@ class WebAdmin:
                     seen = state.get('last_seen')
                     # Format time roughly
                     d['last_seen'] = time.ctime(seen)
+                    d['last_seen_fmt'] = f"{int(time.time() - seen)}s ago"
+                    d['present'] = True
+                    d['room'] = state.get('room', 'Unknown')
+                    d['distance'] = state.get('distance', -1)
                 elif state:
-                     d['last_seen'] = "Away (Seen: " + time.ctime(state.get('last_seen')) + ")"
+                     d['last_seen'] = time.ctime(state.get('last_seen'))
+                     diff = int(time.time() - state.get('last_seen'))
+                     if diff > 86400:
+                         d['last_seen_fmt'] = f"{diff // 86400} days ago"
+                     elif diff > 3600:
+                         d['last_seen_fmt'] = f"{diff // 3600}h ago"
+                     else:
+                         d['last_seen_fmt'] = f"{diff // 60}m ago"
+                     d['present'] = False
                 else:
                     d['last_seen'] = "No recent data"
+                    d['present'] = False
         
         return render_template('dashboard.html', 
                              service_active=True, 
@@ -83,7 +98,6 @@ class WebAdmin:
 
     def manage_devices(self):
         devices = self.config_mgr.load_devices()
-        # Old template expects list of dicts with 'mac', 'alias', 'type'. We have that in JSON.
         return render_template('devices.html', devices=devices)
 
     def add_device(self):
@@ -226,18 +240,13 @@ class WebAdmin:
 
     def manage_mqtt(self):
         prefs = self.config_mgr.load_mqtt()
-        # Template expects 'prefs' dict.
-        # Our JSON keys: broker, port, user, password, topic_prefix
-        # Old keys: mqtt_address, mqtt_port...
-        # We need to map them for the template OR update the template.
-        # Let's map for view context to avoid changing HTML yet
         view_prefs = {
             'mqtt_address': prefs.get('broker'),
             'mqtt_port': prefs.get('port'),
             'mqtt_user': prefs.get('user'),
             'mqtt_password': prefs.get('password'),
             'mqtt_topicpath': prefs.get('topic_prefix'),
-            'mqtt_publisher_identity': 'gatekeeper' # TODO
+            'mqtt_publisher_identity': 'gatekeeper'
         }
         return render_template('mqtt.html', prefs=view_prefs)
 
@@ -251,12 +260,19 @@ class WebAdmin:
             "topic_prefix": data.get('mqtt_topicpath')
         }
         
-        # Save JSON (using a custom method in ConfigMgr to save mqtt specifically)
-        # I need to add save_mqtt to ConfigMgr or just write file
+        # Save directly (ConfigMgr has atomic write helper but exposed as save_settings/devices)
+        # We can use the atomic _atomic_write if we access it, but let's stick to standard open for now or expose it.
+        # Ideally, add save_mqtt to ConfigMgr. For now, use robust open.
         mqtt_file = self.config_mgr.mqtt_file
         try:
-            with open(mqtt_file, 'w') as f:
+            # Atomic-ish write manually
+            tmp_path = mqtt_file + ".tmp"
+            with open(tmp_path, 'w') as f:
                 json.dump(new_conf, f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, mqtt_file)
+            
             flash('MQTT Saved. Please Restart.')
         except Exception as e:
             flash(f"Error: {e}")
@@ -270,13 +286,12 @@ class WebAdmin:
     def save_preferences(self):
         # Flatten form data to dict
         new_prefs = {k: v for k, v in request.form.items()}
-        # Handle Checkboxes (unchecked = missing in form)
+        # Handle Checkboxes
         if 'PREF_DEVICE_TRACKER_REPORT' not in new_prefs: new_prefs['PREF_DEVICE_TRACKER_REPORT'] = 'false'
         if 'PREF_ENABLE_LOGGING' not in new_prefs: new_prefs['PREF_ENABLE_LOGGING'] = 'false'
         
         self.config_mgr.save_settings(new_prefs)
-        # Reload Tracker config?
-        # Core sets up tracker once. Ideally trigger reload.
+        
         if self.tracker:
             self.tracker.reload_config()
             
@@ -284,12 +299,9 @@ class WebAdmin:
         return redirect(url_for('manage_preferences'))
 
     def bluetooth_tools(self):
-        # UI page load
         return render_template('bluetooth.html', scan_results=[])
     
     def bluetooth_scan_api(self):
-        # Called by JS fetch - returns both iBeacons and BLE devices
-        
         # Get known identifiers (both MAC and UUID)
         known_identifiers = set()
         if self.config_mgr:
@@ -302,12 +314,11 @@ class WebAdmin:
         
         results = []
         
-        # Add iBeacons from tracker cache (satellite detected)
+        # Add iBeacons from tracker cache
         if self.tracker and hasattr(self.tracker, 'recent_ibeacons'):
             import time
             now = time.time()
             for uuid, data in list(self.tracker.recent_ibeacons.items()):
-                # Only show iBeacons seen in last 60 seconds
                 if now - data.get('last_seen', 0) < 60:
                     results.append({
                         'type': 'ibeacon',
@@ -322,7 +333,7 @@ class WebAdmin:
                         'sources': ', '.join(data.get('sources', []))
                     })
         
-        # Add regular BLE from local scanner (if enabled)
+        # Add regular BLE from local scanner
         if self.scanner:
             found = self.scanner.get_recent_devices(seconds=30)
             for d in found:
@@ -340,7 +351,6 @@ class WebAdmin:
     def manage_satellites(self):
         satellites = self.config_mgr.load_satellites()
         
-        # Enrich timestamp
         import time
         now = time.time()
         for sid, info in satellites.items():
@@ -356,18 +366,14 @@ class WebAdmin:
         return render_template('satellites.html', satellites=satellites)
 
     def update_satellite(self):
-        # We now iterate through the form to find which satellite is being updated
-        # Or bulk update all. The new form submits all fields.
         sats = self.config_mgr.load_satellites()
         updated = False
         
-        # Iterate over known satellites and pull data from form
         for sid in sats.keys():
             room = request.form.get(f'room_{sid}', '').strip()
             x = request.form.get(f'x_{sid}', '0')
             y = request.form.get(f'y_{sid}', '0')
             
-            # Simple validation
             if room:
                 sats[sid]['room'] = room
                 try:
@@ -402,8 +408,8 @@ class WebAdmin:
                 flash("Satellite not found")
         return redirect(url_for('manage_satellites'))
 
-    # Calibration State (In-memory, simpler than full persistence for this)
-    _calib_sessions = {} # sid -> { 'start': time, 'readings': [] }
+    # Calibration State
+    _calib_sessions = {}
 
     def calibrate_satellite(self):
         sid = request.args.get('satellite')
@@ -426,17 +432,14 @@ class WebAdmin:
             
             elapsed = now - session['start']
             
-            # Get latest reading from Tracker real signal cache
             last_rssi = None
             if self.tracker:
                 sig_data = getattr(self.tracker, 'last_sat_signals', {}).get(sid)
-                # Ensure the reading is recent (last 3 seconds)
                 if sig_data and (now - sig_data['time']) < 3:
                     last_rssi = sig_data['rssi']
                     session['readings'].append(last_rssi)
 
-            # Advanced Logic:
-            # 1. Check Stability via Standard Deviation (last 30 samples)
+            # Logic
             import statistics
             is_stable = False
             progress = 0
@@ -444,23 +447,18 @@ class WebAdmin:
             
             if count >= 30:
                 std_dev = statistics.stdev(session['readings'][-30:])
-                # Goal: stdev < 2.0 AND elapsed > 15s (Sweet spot approach)
                 if std_dev < 2.0 and elapsed > 15:
                     is_stable = True
             
-            # Max time safety: 45s
             if elapsed >= 45:
                 is_stable = True
                 
-            # Progress calculation: mix of count + time, clamped at 99 until finished
             progress = min(99, int((elapsed / 25.0) * 100))
             if is_stable: progress = 100
 
-            # Calculate Trimmed Mean if finished
             avg_rssi = -100
             if progress == 100 and count > 10:
                 vals = sorted(session['readings'])
-                # Trim 10% from both ends
                 trim = max(1, int(len(vals) * 0.1))
                 trimmed_vals = vals[trim:-trim]
                 if trimmed_vals:
@@ -479,21 +477,17 @@ class WebAdmin:
         return json.dumps({'error': 'Invalid action'})
 
     def view_logs(self):
-        # Read logs from file. Location: /home/rpi/gatekeeper.log
         log_content = ""
         try:
              # Try home dir first as per deployment (nohup)
              with open('/home/rpi/gatekeeper.log', 'r') as f:
-                 # Read last 200 lines roughly
                  lines = f.readlines()
                  log_content = "".join(lines[-200:])
         except:
             log_content = "Log file not found or unreadable."
             
-        return render_template('logs.html', log_content=log_content)
+        return render_template('logs.html', logs=log_content) # Consistent var name
 
     def restart_service(self):
-        # In a real deployment, we might trigger systemd restart
-        # subprocess.call(['systemctl', 'restart', 'gatekeeper'])
         flash('Restart triggered (Not implemented in Thread mode yet)')
         return redirect(url_for('dashboard'))
