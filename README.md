@@ -1,80 +1,113 @@
 # Gatekeeper NG: Robust Indoor Presence System
 
-Gatekeeper NG is a high-precision, low-latency indoor presence tracking system designed for Home Assistant. It uses long-range Bluetooth (BLE) and iBeacon technology to detect people (via phones or wearables) with room-level accuracy.
-
-## 🚀 Key Features
-
-- **Polymorphic Tracking**: Supports both legacy Bluetooth MAC addresses and modern iBeacon UUIDs (ideal for iPhones with rotating MACs).
-- **Robust Zoning Engine**: 
-  - **Median Filtering**: Eliminates signal spikes and outliers.
-  - **EMA Smoothing**: Provides stable RSSI curves.
-  - **Hysteresis (>3dB)**: Prevents "flickering" between adjacent rooms.
-  - **Temporal Debounce (3s)**: Requires a stable signal before confirming a room change.
-- **Web Interface**: Full-featured dashboard for device management, satellite assignment, and real-time Bluetooth scanning.
-- **Interactive Calibration**: Built-in 10-second sampling routine to calibrate each sensor's reference RSSI (Measured Power at 1m).
-- **Hot-Reloading**: Update device names or add new sensors without restarting the core service.
+Gatekeeper NG is a high-precision, low-latency indoor presence tracking system designed for Home Assistant. It uses a **Hub + Satellite** architecture to detect devices (phones, watches, iBeacons) via Bluetooth LE and determine their location with room-level accuracy.
 
 ---
 
 ## 🏗️ System Architecture
 
-Gatekeeper follows a **Central Hub + Satellite** architecture:
-
-1.  **Central Hub (Raspberry Pi)**: Runs the main Python backend, Flask Admin UI, and MQTT bridge.
-2.  **Satellites (Seeed Studio XIAO ESP32-C3)**: Distributed sensors that scan for BLE/iBeacons and report raw data to the hub via MQTT.
-3.  **Home Assistant**: Receives room-level location updates via MQTT Discovery.
+- **Central Hub (Raspberry Pi)**: Processes all signal data, runs the Web Admin UI, and manages Home Assistant integration via MQTT Discovery.
+- **Satellites (ESP32-C3)**: Distributed nodes that scan for Bluetooth signals and report RSSI values to the Hub in real-time.
+- **MQTT Broker**: The communication backbone between satellites and the hub.
 
 ---
 
-## 🛠️ Setup & Installation
+## 🛠️ Installation & Setup
 
-### 1. Requirements
-- Raspberry Pi (Hub)
-- ESP32-C3 nodes (Satellites)
-- MQTT Broker (Mosquitto)
-- Home Assistant
+### 1. Raspberry Pi (Hub) Setup
+1. **Initial Dependencies**:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y python3-pip python3-dev bluetooth bluez bluez-tools libbluetooth-dev
+   pip install flask paho-mqtt bleak
+   ```
+2. **Deploy Code**:
+   Clone the repository and place the `gatekeeper_ng` folder in `/home/rpi/`.
+3.  **Run Service**:
+    You can run it manually or set up a systemd service (recommended):
+    ```bash
+    cd /home/rpi/gatekeeper_ng
+    sudo python3 main.py
+    ```
 
-### 2. Satellite Firmware
-Flash the satellites using the provided ESPHome YAML configurations. Ensure each satellite has a unique name (e.g., `gatekeeper-xiao-1`).
+### 2. Satellite (ESP32) Flashing
+All firmware configurations are located in `esphome_configs/`.
+1. **Prepare Environment**:
+   ```bash
+   python3 -m venv venv && source venv/bin/activate
+   pip install esphome
+   ```
+2. **Flash USB**:
+   ```bash
+   # Replace satX.yaml with your specific config
+   esphome run esphome_configs/esp32_sat.yaml --device /dev/ttyUSB0
+   ```
+3. **OTA Updates**: Once flashed, you can update Over-The-Air:
+   ```bash
+   esphome run esphome_configs/esp32_sat.yaml
+   ```
 
-### 3. Backend Deployment
-```bash
-git clone https://github.com/user/gatekeeper-ng.git
-cd gatekeeper-ng
-pip install -r requirements.txt
-python3 main.py
+---
+
+## ⚖️ Calibration & Accuracy
+
+Calibration is **critical** for distance estimation.
+1. Navigate to **Satellites** in the Web UI.
+2. Click **⚖️ Calibrate** for a satellite.
+3. Place your device **1 meter** away and follow the instructions.
+4. The system will calculate the `Ref RSSI at 1m` to normalize distance calculations.
+
+---
+
+## 📱 Web Admin & Advanced Features
+
+Gatekeeper includes a modern, responsive Web UI at `http://<hub-ip>/`:
+
+- **Dashboard**: Track devices, rooms, distances, and last seen times in real-time.
+- **Bluetooth Scanner**:
+    - **Live Discovery**: Scan for all nearby BLE and iBeacon devices.
+    - **Multi-Select Satellite Filter**: Filter results to see only what specific satellites detect.
+    - **Visual Highlighting**: Selected satellites' signals are highlighted (bold), while others are dimmed.
+    - **Device Counter**: See the total number of devices currently filtered.
+- **Device Management**: Add/Edit/Delete tracked devices (MAC or iBeacon UUID).
+
+---
+
+## 🏠 Home Assistant Integration
+
+Gatekeeper uses **MQTT Discovery** to automatically create entities in Home Assistant.
+Each device generates:
+- `device_tracker`: Main presence entity.
+- `sensor.room`: Current room name.
+- `sensor.distance`: Estimated distance in meters.
+- `sensor.rssi`: Signal strength.
+
+---
+
+## 📂 Project Structure
+
+```
+.
+├── gatekeeper_ng/          # Core Python application
+│   ├── app/                # Backend logic (Tracker, MQTT, Signals)
+│   ├── admin/              # Flask Web Admin & Templates
+│   └── config/             # Local configuration (JSON)
+├── esphome_configs/        # YAML configurations for ESP32 satellites
+└── README.md               # Unified manual & system overview
 ```
 
 ---
 
-## ⚖️ Calibration (Crucial for Accuracy)
+## 🐞 Troubleshooting & Logs
 
-To get the best results, you MUST calibrate each satellite:
-1. Navigate to the **Satellites** tab in the Web UI.
-2. Click **⚖️ Calibrate** next to a sensor.
-3. Place your phone exactly **1 meter** from the sensor.
-4. Run the 10-second sample.
-5. Save the result.
-
-The system will use this value to normalize signals, ensuring that a sensor at 4m always reports a "weaker" signal than one at 2m, regardless of antenna differences.
-
----
-
-## 🐞 Known Issues & Challenges
-
-- **iPhone Backgrounding**: Some iPhones aggressively sleep their iBeacon broadcast when the screen is off. Enabling "Background Monitoring" in the HA Companion App is required.
-- **Signal Absorption**: Human bodies and water tanks can absorb up to 10-15dB of signal, occasionally causing "false negatives" if the sensor is blocked.
-- **Initial Discovery**: New satellites appear as `Unassigned` and require a manual room name assignment in the UI.
+- **Logs**: View real-time logs in the Web UI under the **Logs** tab or via:
+  ```bash
+  tail -f /home/rpi/gatekeeper.log
+  ```
+- **MQTT**: Verify data flow with:
+  ```bash
+  mosquitto_sub -h <broker-ip> -u <user> -P <pass> -t 'gatekeeper/#' -v
+  ```
 
 ---
-
-## 🗺️ Roadmap & Future Improvements
-
-- [ ] **Native WCL Algorithm**: Re-introduce Weighted Centroid Localization for 2D/3D floor plan positioning.
-- [ ] **Automatic Hysteresis**: Self-adjusting margins based on environmental noise floor.
-- [ ] **Multi-Hub Mesh**: Synchronization between multiple Gatekeeper hubs for very large buildings.
-- [ ] **Mobile App**: Dedicated lightweight app to replace iBeacon simulation for more stable broadcasting.
-
----
-
-**Developed for Advanced Agentic Coding Projects.**
+**Gatekeeper NG - High Precision Presence for the Modern Home.**
