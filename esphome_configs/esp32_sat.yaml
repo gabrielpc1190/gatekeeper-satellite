@@ -37,9 +37,12 @@ esp32_ble_tracker:
   on_ble_advertise:
     then:
       - lambda: |-
-          // Protocolo Gatekeeper: gatekeeper/satellite/<satellite_id>/<identifier>
+          static std::map<std::string, int> last_rssi_map;
+          static std::map<std::string, uint32_t> last_send_map;
+          
           char topic[256];
           char payload[128];
+          std::string id_str;
           
           if (x.get_ibeacon().has_value()) {
             auto beacon = x.get_ibeacon().value();
@@ -47,8 +50,53 @@ esp32_ble_tracker:
             sprintf(topic, "gatekeeper/satellite/${name}/uuid/%s", uuid_str.c_str());
             sprintf(payload, "{\"rssi\": %d, \"major\": %d, \"minor\": %d}", 
                     x.get_rssi(), beacon.get_major(), beacon.get_minor());
+            id_str = uuid_str;
           } else {
             sprintf(topic, "gatekeeper/satellite/${name}/%s", x.address_str().c_str());
             sprintf(payload, "%d", x.get_rssi());
+            id_str = x.address_str();
           }
-          id(mqtt_client).publish(topic, payload);
+
+          // Throttling Logic
+          bool should_send = false;
+          uint32_t now = millis();
+          
+          if (last_rssi_map.find(id_str) == last_rssi_map.end()) {
+             should_send = true;
+          } else {
+             int last_rssi = last_rssi_map[id_str];
+             if (abs(x.get_rssi() - last_rssi) >= 3) should_send = true; // 3dB Delta
+             if (now - last_send_map[id_str] > 5000) should_send = true; // 5s Keepalive
+          }
+
+          if (should_send) {
+             last_rssi_map[id_str] = x.get_rssi();
+             last_send_map[id_str] = now;
+             id(mqtt_client).publish(topic, payload);
+             
+             // Blink LED on activity
+             auto call = id(sat_status_led).turn_on();
+             call.set_transition_length(0);
+             call.set_brightness(1.0);
+             call.perform();
+             delay(10);
+             auto call_off = id(sat_status_led).turn_off();
+             call_off.set_transition_length(0);
+             call_off.perform();
+          }
+
+sensor:
+  - platform: wifi_signal
+    name: "${name} WiFi Signal"
+    update_interval: 60s
+  - platform: uptime
+    name: "${name} Uptime"
+    update_interval: 60s
+
+light:
+  - platform: status_led
+    name: "${name} Status LED"
+    id: sat_status_led
+    pin:
+      number: GPIO2
+      inverted: true

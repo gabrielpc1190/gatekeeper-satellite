@@ -23,6 +23,10 @@ mqtt:
   username: "gatekeeper_pi" # Optional
   password: "gatekeeper_pi" # Optional
 
+ota:
+  - platform: esphome
+    password: "gatekeeper_ota"
+
 logger:
 
 esp32_ble_tracker:
@@ -33,30 +37,50 @@ esp32_ble_tracker:
   on_ble_advertise:
     then:
       - lambda: |-
-          // Topic: gatekeeper/satellite/<satellite_id>/<identifier>
-          // We use the node name as satellite ID
+          static std::map<std::string, int> last_rssi_map;
+          static std::map<std::string, uint32_t> last_send_map;
           
           char topic[256];
           char payload[128];
+          std::string id_str;
           
-          // Check if this is an iBeacon advertisement
+          // Identifier Extraction
           if (x.get_ibeacon().has_value()) {
-            // iBeacon detected - publish by UUID
             auto beacon = x.get_ibeacon().value();
             std::string uuid_str = beacon.get_uuid().to_string();
-            
-            // Topic: gatekeeper/satellite/{name}/uuid/{UUID}
             sprintf(topic, "gatekeeper/satellite/${name}/uuid/%s", uuid_str.c_str());
-            
-            // Payload: JSON with rssi, major, minor
             sprintf(payload, "{\"rssi\": %d, \"major\": %d, \"minor\": %d}", 
                     x.get_rssi(), beacon.get_major(), beacon.get_minor());
+            id_str = uuid_str;     
           } else {
-            // Non-iBeacon - publish by MAC (legacy/fallback)
             sprintf(topic, "gatekeeper/satellite/${name}/%s", x.address_str().c_str());
             sprintf(payload, "%d", x.get_rssi());
+            id_str = x.address_str();
           }
+
+          // Throttling Logic
+          bool should_send = false;
+          uint32_t now = millis();
           
-          // Publish to MQTT
-          id(mqtt_client).publish(topic, payload);
+          if (last_rssi_map.find(id_str) == last_rssi_map.end()) {
+             should_send = true;
+          } else {
+             int last_rssi = last_rssi_map[id_str];
+             if (abs(x.get_rssi() - last_rssi) >= 3) should_send = true; // 3dB Delta
+             if (now - last_send_map[id_str] > 5000) should_send = true; // 5s Keepalive
+          }
+
+          if (should_send) {
+             last_rssi_map[id_str] = x.get_rssi();
+             last_send_map[id_str] = now;
+             id(mqtt_client).publish(topic, payload);
+          }
+
+sensor:
+  - platform: wifi_signal
+    name: "${name} WiFi Signal"
+    update_interval: 60s
+  - platform: uptime
+    name: "${name} Uptime"
+    update_interval: 60s
 
