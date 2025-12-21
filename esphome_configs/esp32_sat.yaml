@@ -22,6 +22,7 @@ mqtt:
   broker: "${mqtt_broker}"
   username: "gatekeeper_pi" 
   password: "gatekeeper_pi" 
+  topic_prefix: gatekeeper/satellite/${name}
 
 ota:
   - platform: esphome
@@ -47,12 +48,12 @@ esp32_ble_tracker:
           if (x.get_ibeacon().has_value()) {
             auto beacon = x.get_ibeacon().value();
             std::string uuid_str = beacon.get_uuid().to_string();
-            sprintf(topic, "gatekeeper/satellite/${name}/uuid/%s", uuid_str.c_str());
+            sprintf(topic, "uuid/%s", uuid_str.c_str());
             sprintf(payload, "{\"rssi\": %d, \"major\": %d, \"minor\": %d}", 
                     x.get_rssi(), beacon.get_major(), beacon.get_minor());
             id_str = uuid_str;
           } else {
-            sprintf(topic, "gatekeeper/satellite/${name}/%s", x.address_str().c_str());
+            sprintf(topic, "%s", x.address_str().c_str());
             sprintf(payload, "%d", x.get_rssi());
             id_str = x.address_str();
           }

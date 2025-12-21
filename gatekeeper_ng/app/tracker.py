@@ -7,11 +7,13 @@ class DeviceTracker:
     def __init__(self, config_mgr, mqtt_client):
         self.config_mgr = config_mgr
         self.mqtt_client = mqtt_client
+        self.mqtt_client.health_callback = self.process_satellite_health
         self.logger = logging.getLogger("Tracker")
         
         # State
         self.known_devices = {} # identifier -> config_dict
         self.current_state = {} 
+        self.satellite_stats = {} # sid -> {sensor_name: value, last_seen: time}
         
         # Signal Buffers
         self.signal_buffers = {}
@@ -47,6 +49,17 @@ class DeviceTracker:
         settings = self.config_mgr.load_settings()
         self.timeout_interval = int(settings.get("PREF_BEACON_EXPIRATION", 60))
         self.logger.info(f"Loaded {len(self.known_devices)} known devices.")
+
+    async def process_satellite_health(self, satellite_id, sensor_name, value):
+        """Handle health sensors from satellites (WiFi, Uptime, etc.)"""
+        if satellite_id not in self.satellite_stats:
+            self.satellite_stats[satellite_id] = {}
+        
+        self.satellite_stats[satellite_id][sensor_name] = value
+        self.satellite_stats[satellite_id]['last_health_update'] = time.time()
+        
+        # Also ensure last_seen in config gets updated via remote packet or here
+        await self._check_satellite_registration(satellite_id)
 
     async def process_remote_packet(self, satellite_id, identifier, rssi, extra_data=None):
         # 1. Update Calibration Cache

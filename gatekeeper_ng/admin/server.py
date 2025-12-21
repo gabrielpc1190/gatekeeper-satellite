@@ -399,6 +399,11 @@ class WebAdmin:
         satellites = self.config_mgr.load_satellites()
         now = time.time()
         for sid, info in satellites.items():
+            # Add health stats if available
+            stats = self.tracker.satellite_stats.get(sid, {})
+            info['wifi_signal'] = stats.get('wifi_signal', '--')
+            info['uptime'] = stats.get('uptime', '--')
+            
             last = info.get('last_seen', 0)
             diff = int(now - last)
             if diff < 60:

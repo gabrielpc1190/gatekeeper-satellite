@@ -21,6 +21,7 @@ class MQTTClient:
         self.client = None
         self.connected = False
         self.satellite_callback = None # Function(satellite_id, identifier, rssi, extra)
+        self.health_callback = None # Function(satellite_id, sensor_name, value)
         self.topic_prefix = config.get("topic_prefix", "monitor")
         self.identity = "gatekeeper" 
         self.loop = None 
@@ -103,15 +104,31 @@ class MQTTClient:
             
             # MAC: .../MAC -> Payload RSSI (int)
             elif len(parts) >= 4:
-                mac = parts[3].upper()
-                try:
-                    rssi = int(float(msg.payload.decode()))
-                    self._dispatch_callback(satellite_id, mac, rssi, {})
-                except ValueError:
-                    pass
+                # Check for health sensors: .../sensor/name/state
+                if parts[3] == 'sensor' and len(parts) >= 6:
+                    sensor_name = parts[4]
+                    try:
+                        value = msg.payload.decode()
+                        self._dispatch_health_callback(satellite_id, sensor_name, value)
+                    except: pass
+                else:
+                    mac = parts[3].upper()
+                    try:
+                        rssi = int(float(msg.payload.decode()))
+                        self._dispatch_callback(satellite_id, mac, rssi, {})
+                    except ValueError:
+                        pass
 
         except Exception as e:
             self.logger.error(f"Error processing message: {e}")
+
+    def _dispatch_health_callback(self, sid, name, val):
+        """Thread-safe dispatch to main loop for health stats."""
+        if self.health_callback and self.loop:
+            asyncio.run_coroutine_threadsafe(
+                self.health_callback(sid, name, val), 
+                self.loop
+            )
 
     def _dispatch_callback(self, sid, ident, rssi, extra):
         """Thread-safe dispatch to main loop."""
