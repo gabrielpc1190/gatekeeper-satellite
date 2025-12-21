@@ -79,6 +79,9 @@ async def main_entry(base_path, legacy_path):
                         format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
     
+    # Silence noisy werkzeug logs (web server requests)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    
     service = CoreService(base_path, legacy_path)
     
     # Handle Signals

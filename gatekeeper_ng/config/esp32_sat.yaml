@@ -1,0 +1,54 @@
+substitutions:
+  name: "gatekeeper-esp32-1"
+  wifi_ssid: "GADI_IoT"
+  wifi_pass: "01012010"
+  mqtt_broker: "172.16.10.12"
+
+esphome:
+  name: "${name}"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+wifi:
+  ssid: "${wifi_ssid}"
+  password: "${wifi_pass}"
+  fast_connect: true
+
+mqtt:
+  id: mqtt_client
+  broker: "${mqtt_broker}"
+  username: "gatekeeper_pi" 
+  password: "gatekeeper_pi" 
+
+ota:
+  - platform: esphome
+    password: "gatekeeper_ota"
+
+logger:
+
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 1100ms
+    window: 1100ms
+    active: true
+  on_ble_advertise:
+    then:
+      - lambda: |-
+          // Protocolo Gatekeeper: gatekeeper/satellite/<satellite_id>/<identifier>
+          char topic[256];
+          char payload[128];
+          
+          if (x.get_ibeacon().has_value()) {
+            auto beacon = x.get_ibeacon().value();
+            std::string uuid_str = beacon.get_uuid().to_string();
+            sprintf(topic, "gatekeeper/satellite/${name}/uuid/%s", uuid_str.c_str());
+            sprintf(payload, "{\"rssi\": %d, \"major\": %d, \"minor\": %d}", 
+                    x.get_rssi(), beacon.get_major(), beacon.get_minor());
+          } else {
+            sprintf(topic, "gatekeeper/satellite/${name}/%s", x.address_str().c_str());
+            sprintf(payload, "%d", x.get_rssi());
+          }
+          id(mqtt_client).publish(topic, payload);

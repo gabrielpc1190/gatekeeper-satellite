@@ -12,17 +12,6 @@ class DeviceTracker:
         # State
         self.known_devices = {} # identifier -> config_dict
         self.current_state = {} 
-        # State Structure:
-        # identifier -> {
-        #    'present': bool,
-        #    'last_seen': float,
-        #    'room': str, 
-        #    'rssi': int,
-        #    'distance': float,  
-        #    'sources': { 
-        #         'sat_id': {'raw_rssi': int, 'smooth_rssi': float, 'distance': float, 'last_seen': float, 'room_name': str} 
-        #    }
-        # }
         
         # Signal Buffers
         self.signal_buffers = {}
@@ -30,8 +19,8 @@ class DeviceTracker:
         # Zoning State 
         self.zoning_state = {} 
         
-        # iBeacon Cache for UI
-        self.recent_ibeacons = {}
+        # Discovery Cache for UI (Shared for iBeacons and BLE MACs)
+        self.discovery_cache = {}
         
         # Calibration helper
         self.last_sat_signals = {}
@@ -68,9 +57,8 @@ class DeviceTracker:
             if rssi > self.last_sat_signals[satellite_id]['rssi']:
                 self.last_sat_signals[satellite_id] = {'rssi': rssi, 'time': now}
 
-        # 2. Cache iBeacons (UI only)
-        if extra_data and ('-' in identifier and len(identifier) == 36):
-            self._update_ibeacon_cache(satellite_id, identifier, rssi, extra_data)
+        # 2. Update Discovery Cache (UI only)
+        self._update_discovery_cache(satellite_id, identifier, rssi, extra_data)
             
         # 3. Manage Satellite Registration 
         await self._check_satellite_registration(satellite_id)
@@ -98,10 +86,6 @@ class DeviceTracker:
         # Distance calculation
         dist = calculate_distance(smooth_rssi, tx_power=measured_ref)
         
-        # Offset (Legacy approach, kept for RSSI normalization if needed, but distance is better)
-        offset = measured_ref - (-59)
-        normalized_rssi = smooth_rssi - offset
-        
         # Update Source State
         state = self.current_state[identifier]
         actual_room = sat_info.get('room', 'Unassigned')
@@ -110,7 +94,7 @@ class DeviceTracker:
             
         state['sources'][satellite_id] = {
             'raw_rssi': rssi,
-            'smooth_rssi': normalized_rssi,
+            'smooth_rssi': smooth_rssi,
             'distance': dist,
             'last_seen': now,
             'room_name': actual_room
@@ -145,12 +129,10 @@ class DeviceTracker:
             self.zoning_state[identifier] = {'pending_room': None, 'start': 0}
         z_state = self.zoning_state[identifier]
         
-        # Immediate switch if unknown
         if current_room in ['unknown', 'Unassigned'] and candidate_room != 'Unassigned':
              await self._change_room(identifier, candidate_room, best_rssi, candidate_dist)
              return
         
-        # Find current room strength
         current_room_rssi = -999
         for sat, data in state['sources'].items():
             if (now - data['last_seen']) < self.absence_timeout:
@@ -162,7 +144,6 @@ class DeviceTracker:
              await self._change_room(identifier, candidate_room, best_rssi, candidate_dist)
              return
              
-        # Hysteresis Check
         if best_rssi > (current_room_rssi + self.hysteresis_db):
             if z_state['pending_room'] == candidate_room:
                 if (now - z_state['start']) >= self.debounce_time:
@@ -177,9 +158,6 @@ class DeviceTracker:
         if state['room'] == current_room:
             old_rssi = state.get('rssi', -100)
             state['rssi'] = current_room_rssi
-            # Update distance for current room based on best sat in that room
-            # (Simple approximation: use best sat's distance)
-            # Better: recalculate best sat for current room
             best_curr_dist = -1
             for sat, data in state['sources'].items():
                  if data['room_name'] == current_room and data['smooth_rssi'] == current_room_rssi:
@@ -200,16 +178,35 @@ class DeviceTracker:
         self.logger.info(f"ZONE CHANGE: {identifier} {old_room} -> {new_room} (RSSI: {new_rssi:.1f}, Dist: {new_dist}m)")
         await self.publish_update(identifier)
 
-    def _update_ibeacon_cache(self, satellite_id, identifier, rssi, extra_data):
-        if identifier not in self.recent_ibeacons:
-            self.recent_ibeacons[identifier] = {
-                'uuid': identifier, 'rssi': rssi, 'major': extra_data.get('major'), 'minor': extra_data.get('minor'),
-                'last_seen': time.time(), 'sources': [satellite_id]
+    def _update_discovery_cache(self, satellite_id, identifier, rssi, extra_data):
+        # We cap the cache size just in case
+        if len(self.discovery_cache) > 200:
+             # Clean old ones
+             now = time.time()
+             old_keys = [k for k, v in self.discovery_cache.items() if (now - v['last_seen']) > 300]
+             for k in old_keys: del self.discovery_cache[k]
+             
+        if identifier not in self.discovery_cache:
+            self.discovery_cache[identifier] = {
+                'identifier': identifier, 
+                'rssi': rssi, 
+                'major': extra_data.get('major') if extra_data else None, 
+                'minor': extra_data.get('minor') if extra_data else None,
+                'name': extra_data.get('name') if extra_data else None,
+                'last_seen': time.time(), 
+                'sources': {satellite_id: rssi}
             }
         else:
-            c = self.recent_ibeacons[identifier]
-            c['rssi'] = rssi; c['last_seen'] = time.time()
-            if satellite_id not in c['sources']: c['sources'].append(satellite_id)
+            c = self.discovery_cache[identifier]
+            c['rssi'] = max(c['rssi'], rssi) # Keep best RSSI
+            c['last_seen'] = time.time()
+            c['sources'][satellite_id] = rssi
+            if extra_data and extra_data.get('name'):
+                c['name'] = extra_data.get('name')
+
+    def clear_discovery_cache(self):
+        self.discovery_cache = {}
+        self.logger.info("Discovery cache cleared by user.")
 
     async def _check_satellite_registration(self, satellite_id):
         if not hasattr(self, '_mem_satellites_cache'):
@@ -231,6 +228,7 @@ class DeviceTracker:
         extra = {
             "room": state.get('room', 'unknown'),
             "distance": state.get('distance', -1),
+            "last_seen": int(state.get('last_seen', 0)),
             "raw_sources": {k: int(v['raw_rssi']) for k, v in state.get('sources', {}).items()}
         }
         await self.mqtt_client.publish_presence(conf, state['present'], int(state.get('rssi', -100)), attributes=extra)
@@ -260,4 +258,4 @@ class DeviceTracker:
 
     async def process_packet(self, record):
         # Local packet from Hub
-        await self.process_remote_packet('gatekeeper-hub', record.get('identifier', record['mac'].upper()), record['rssi'], extra_data=record.get('extra'))
+        await self.process_remote_packet('gatekeeper-hub', record.get('identifier', record['mac'].upper()), record['rssi'], extra_data=record)

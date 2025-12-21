@@ -5,11 +5,8 @@
     <div style="display:flex; justify-content:space-between; align-items:center;">
         <h2>Manage Devices</h2>
         <div style="display: flex; gap: 0.5rem;">
-            <form action="/devices/announce" method="post"
-                onsubmit="return confirm('Publish devices to Home Assistant via MQTT Discovery?');">
-                <button type="submit" class="btn btn-primary" style="background-color: #0ea5e9;">📣 HA
-                    Discovery</button>
-            </form>
+            <button type="button" class="btn btn-primary" style="background-color: #0ea5e9;" onclick="openHAModal()">📣
+                HA Discovery</button>
             <a href="/" class="btn btn-ghost">Back to Dashboard</a>
         </div>
     </div>
@@ -36,7 +33,7 @@
                     style="color: var(--text-secondary); font-size: 0.875rem; display: block; margin-bottom: 0.5rem;">Identifier
                     (MAC or UUID)</label>
                 <input type="text" name="identifier" id="new_identifier" placeholder="XX:XX:XX:XX:XX:XX" required
-                    pattern="^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$"
+                    pattern="^([0-9A-Fa-f]{2}[:\-]){5}([0-9A-Fa-f]{2})$"
                     style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-family: monospace;">
             </div>
 
@@ -115,12 +112,11 @@
                                 onclick="openEditModal('{{ display_id }}', '{{ id_type }}', '{{ device.alias }}', '{{ device.type }}')">
                                 Edit
                             </button>
-                            <form action="/devices/delete" method="post" style="display: inline;"
-                                onsubmit="return confirm('Stop tracking {{ device.alias }}?');">
-                                <input type="hidden" name="identifier" value="{{ display_id }}">
-                                <button type="submit" class="btn"
-                                    style="color: #ef4444; background: transparent; padding: 0.25rem 0.5rem; font-size: 0.875rem;">Delete</button>
-                            </form>
+                            <button class="btn"
+                                style="color: #ef4444; background: transparent; padding: 0.25rem 0.5rem; font-size: 0.875rem;"
+                                onclick="openDeleteModal('{{ display_id }}', '{{ device.alias }}')">
+                                Delete
+                            </button>
                         </td>
                     </tr>
                     {% endfor %}
@@ -181,6 +177,45 @@
         </form>
     </div>
 </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="deleteModal"
+    style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
+    <div class="card" style="width: 100%; max-width: 400px; margin: 1rem; position: relative; text-align: center;">
+        <h3 style="margin-top: 0; color: #ef4444;">Delete Device?</h3>
+        <p id="deleteMessage" style="color: var(--text-primary); margin-bottom: 2rem;">Are you sure you want to delete
+            this device?</p>
+
+        <form action="/devices/delete" method="post" id="deleteForm">
+            <input type="hidden" name="identifier" id="deleteIdentifier">
+            <div style="display: flex; gap: 1rem; justify-content: center;">
+                <button type="button" onclick="closeDeleteModal()" class="btn btn-ghost">Cancel</button>
+                <button type="submit" class="btn" style="background: #ef4444; color: white; border: none;">Yes,
+                    Delete</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+</div>
+
+<!-- HA Discovery Modal -->
+<div id="haModal"
+    style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
+    <div class="card" style="width: 100%; max-width: 400px; margin: 1rem; position: relative; text-align: center;">
+        <h3 style="margin-top: 0; color: #0ea5e9;">Home Assistant Discovery</h3>
+        <p style="color: var(--text-primary); margin-bottom: 2rem;">Publish all devices to Home Assistant via MQTT
+            Discovery?</p>
+
+        <form action="/devices/announce" method="post">
+            <div style="display: flex; gap: 1rem; justify-content: center;">
+                <button type="button" onclick="closeHAModal()" class="btn btn-ghost">Cancel</button>
+                <button type="submit" class="btn btn-primary" style="background-color: #0ea5e9;">Yes, Publish</button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <script>
     function togglePattern() {
@@ -188,7 +223,7 @@
         const input = document.getElementById('new_identifier');
         if (type === 'mac') {
             input.placeholder = "XX:XX:XX:XX:XX:XX";
-            input.pattern = "^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$";
+            input.pattern = "^([0-9A-Fa-f]{2}[:\\-]){5}([0-9A-Fa-f]{2})$";
         } else {
             input.placeholder = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
             input.pattern = "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}";
@@ -205,7 +240,7 @@
         document.getElementById('idLabel').innerText = (type === 'mac' ? 'MAC Address' : 'iBeacon UUID');
         const idInput = document.getElementById('editIdentifier');
         if (type === 'mac') {
-            idInput.pattern = "^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$";
+            idInput.pattern = "^([0-9A-Fa-f]{2}[:\\-]){5}([0-9A-Fa-f]{2})$";
         } else {
             idInput.pattern = "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}";
         }
@@ -215,6 +250,24 @@
 
     function closeEditModal() {
         document.getElementById('editModal').style.display = 'none';
+    }
+
+    function openDeleteModal(ident, alias) {
+        document.getElementById('deleteIdentifier').value = ident;
+        document.getElementById('deleteMessage').innerText = `Stop tracking "${alias}"?`;
+        document.getElementById('deleteModal').style.display = 'flex';
+    }
+
+    function closeDeleteModal() {
+        document.getElementById('deleteModal').style.display = 'none';
+    }
+
+    function openHAModal() {
+        document.getElementById('haModal').style.display = 'flex';
+    }
+
+    function closeHAModal() {
+        document.getElementById('haModal').style.display = 'none';
     }
 </script>
 {% endblock %}

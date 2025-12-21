@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Gatekeeper Admin</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
@@ -19,6 +19,14 @@
             --border: #334155;
         }
 
+        html {
+            height: 100%;
+            overflow-y: scroll;
+            /* Force vertical scrollbar always to prevent layout jump */
+            -webkit-overflow-scrolling: touch;
+            /* Smooth scrolling on iOS */
+        }
+
         body {
             font-family: 'Inter', sans-serif;
             background-color: var(--bg-color);
@@ -27,13 +35,18 @@
             padding: 0;
             display: flex;
             justify-content: center;
-            min-height: 100vh;
+            min-height: 100%;
+            /* Changed from 100vh to ensure it flows with content */
+            width: 100%;
         }
 
         .container {
             width: 100%;
             max-width: 1100px;
             padding: 2rem;
+            box-sizing: border-box;
+            background-color: var(--bg-color);
+            /* Ensure container has background */
         }
 
         header {
@@ -159,6 +172,7 @@
             font-size: 0.875rem;
             resize: vertical;
             margin-bottom: 1rem;
+            box-sizing: border-box;
         }
 
         .actions {
@@ -175,6 +189,42 @@
             background: rgba(59, 130, 246, 0.2);
             color: var(--accent);
             border: 1px solid var(--accent);
+        }
+
+        /* Mobile Optimization */
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .card {
+                padding: 1rem;
+            }
+
+            /* Utilities for hiding columns */
+            .hidden-mobile {
+                display: none !important;
+            }
+
+            /* Responsive Grid */
+            .grid-container {
+                grid-template-columns: 1fr !important;
+            }
+
+            /* Better touch targets */
+            .btn {
+                padding: 0.75rem 1rem;
+            }
+
+            /* Table responsiveness */
+            table {
+                font-size: 0.9rem;
+            }
+
+            th,
+            td {
+                padding: 0.5rem !important;
+            }
         }
     </style>
 </head>

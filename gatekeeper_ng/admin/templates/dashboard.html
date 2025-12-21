@@ -18,39 +18,47 @@
 </div>
 
 <div class="card">
-    <h2>Tracked Devices</h2>
-    <div style="background: rgba(0,0,0,0.2); border-radius: 8px; overflow: hidden;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+        <h2 style="margin:0;">Tracked Devices</h2>
+        <span class="subtitle" style="font-size: 0.75rem;">Live Updates</span>
+    </div>
+    <div
+        style="background: rgba(0,0,0,0.2); border-radius: 8px; overflow: hidden; max-height: 500px; overflow-y: auto;">
         <table style="width: 100%; border-collapse: collapse; text-align: left;">
             <thead>
                 <tr style="background: rgba(255,255,255,0.05);">
                     <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Alias</th>
-                    <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">MAC Address</th>
+                    <th class="hidden-mobile" style="padding: 0.75rem; border-bottom: 1px solid var(--border);">MAC
+                        Address</th>
                     <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Room</th>
                     <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Distance</th>
                     <th style="padding: 0.75rem; border-bottom: 1px solid var(--border);">Last Activity</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody id="device-table-body">
                 {% if devices %}
                 {% for device in devices %}
-                <tr>
+                <tr id="row-{{ device.mac|replace(':', '') }}">
                     <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">{{ device.alias }}</td>
-                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border); font-family: monospace;">{{ device.mac }}</td>
+                    <td class="hidden-mobile"
+                        style="padding: 0.75rem; border-bottom: 1px solid var(--border); font-family: monospace;">{{
+                        device.mac }}</td>
                     <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">
                         {% if device.present %}
-                            <span class="status-badge status-active">{{ device.room|default('Unknown') }}</span>
+                        <span class="status-badge status-active">{{ device.room|default('Unknown') }}</span>
                         {% else %}
-                            <span class="status-badge status-inactive">Away</span>
+                        <span class="status-badge status-inactive">Away</span>
                         {% endif %}
                     </td>
                     <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">
-                        {% if device.distance and device.distance > 0 %}
-                            {{ device.distance }}m
+                        {% if device.distance and device.distance != '-' %}
+                        {{ device.distance }}
                         {% else %}
-                            -
+                        -
                         {% endif %}
                     </td>
-                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">{{ device.last_seen_fmt|default(device.last_seen) }}</td>
+                    <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">{{
+                        device.last_seen_fmt|default(device.last_seen) }}</td>
                 </tr>
                 {% endfor %}
                 {% else %}
@@ -66,11 +74,13 @@
     </div>
 </div>
 
-<div style="display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 2rem;">
+<div class="grid-container"
+    style="display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 2rem;">
 
     <!-- Devices Card -->
     <a href="/devices" style="text-decoration: none;">
-        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid var(--accent);">
+        <div class="card"
+            style="height: 100%; transition: transform 0.2s; border-left: 4px solid var(--accent); box-sizing: border-box;">
             <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
                 <div style="background: rgba(59, 130, 246, 0.1); padding: 0.75rem; border-radius: 8px;">
                     <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -86,7 +96,8 @@
 
     <!-- Preferences Card -->
     <a href="/preferences" style="text-decoration: none;">
-        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid #8b5cf6;">
+        <div class="card"
+            style="height: 100%; transition: transform 0.2s; border-left: 4px solid #8b5cf6; box-sizing: border-box;">
             <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
                 <div style="background: rgba(139, 92, 246, 0.1); padding: 0.75rem; border-radius: 8px; color: #8b5cf6;">
                     <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -105,7 +116,8 @@
 
     <!-- MQTT Card -->
     <a href="/mqtt" style="text-decoration: none;">
-        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid #10b981;">
+        <div class="card"
+            style="height: 100%; transition: transform 0.2s; border-left: 4px solid #10b981; box-sizing: border-box;">
             <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
                 <div style="background: rgba(16, 185, 129, 0.1); padding: 0.75rem; border-radius: 8px; color: #10b981;">
                     <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -120,7 +132,8 @@
     </a>
     <!-- Bluetooth Tools Card -->
     <a href="/bluetooth" style="text-decoration: none;">
-        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid #3b82f6;">
+        <div class="card"
+            style="height: 100%; transition: transform 0.2s; border-left: 4px solid #3b82f6; box-sizing: border-box;">
             <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
                 <div style="background: rgba(59, 130, 246, 0.1); padding: 0.75rem; border-radius: 8px; color: #3b82f6;">
                     <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -136,16 +149,20 @@
 
     <!-- Satellites Card -->
     <a href="/satellites" style="text-decoration: none;">
-        <div class="card" style="height: 100%; transition: transform 0.2s; border-left: 4px solid #f59e0b;">
+        <div class="card"
+            style="height: 100%; transition: transform 0.2s; border-left: 4px solid #f59e0b; box-sizing: border-box;">
             <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
                 <div style="background: rgba(245, 158, 11, 0.1); padding: 0.75rem; border-radius: 8px; color: #f59e0b;">
                     <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                        <path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3m0 0V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+                        <path
+                            d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3m0 0V5a3 3 0 116 0v6a3 3 0 01-3 3z">
+                        </path>
                     </svg>
                 </div>
                 <h2 style="margin: 0; font-size: 1.25rem; color: var(--text-primary);">Satellites</h2>
             </div>
-            <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">Manage rooms & multi-room sensors.</p>
+            <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">Manage rooms & multi-room sensors.
+            </p>
         </div>
     </a>
 
@@ -156,4 +173,45 @@
         transform: translateY(-2px);
     }
 </style>
+
+<script>
+    function updateDevices() {
+        fetch('/api/devices')
+            .then(response => response.json())
+            .then(data => {
+                const tbody = document.getElementById('device-table-body');
+                tbody.innerHTML = '';
+
+                if (data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" style="padding: 1rem; text-align: center; color: var(--text-secondary);">No configured devices</td></tr>`;
+                    return;
+                }
+
+                data.forEach(device => {
+                    const row = document.createElement('tr');
+
+                    // Create Status Badge HTML
+                    let statusHtml = '';
+                    if (device.present) {
+                        statusHtml = `<span class="status-badge status-active">${device.room}</span>`;
+                    } else {
+                        statusHtml = `<span class="status-badge status-inactive">Away</span>`;
+                    }
+
+                    row.innerHTML = `
+                        <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">${device.alias}</td>
+                        <td class="hidden-mobile" style="padding: 0.75rem; border-bottom: 1px solid var(--border); font-family: monospace;">${device.mac}</td>
+                        <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">${statusHtml}</td>
+                        <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">${device.distance || '-'}</td>
+                        <td style="padding: 0.75rem; border-bottom: 1px solid var(--border);">${device.last_seen_fmt}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            })
+            .catch(error => console.error('Error fetching devices:', error));
+    }
+
+    // Poll every 2 seconds
+    setInterval(updateDevices, 2000);
+</script>
 {% endblock %}

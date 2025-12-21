@@ -164,29 +164,122 @@ class MQTTClient:
         """Publish Home Assistant Discovery payloads."""
         if not self.connected: return
             
+        # 0. HUB Discovery (The "Parent" device)
+        hub_id = f"gk_{self.identity}_hub"
+        hub_disc_topic = f"homeassistant/binary_sensor/{hub_id}/config"
+        hub_device = {
+            "identifiers": [hub_id],
+            "name": f"Gatekeeper Hub ({self.identity})",
+            "manufacturer": "Gatekeeper",
+            "model": "Gatekeeper NG Hub",
+            "sw_version": "1.0.1"
+        }
+        hub_payload = {
+            "name": "Status",
+            "unique_id": hub_id,
+            "state_topic": f"{self.topic_prefix}/{self.identity}/status",
+            "payload_on": "online",
+            "payload_off": "offline",
+            "device_class": "connectivity",
+            "device": hub_device
+        }
+        self.client.publish(hub_disc_topic, json.dumps(hub_payload), retain=True)
+        # Also publish the hub status itself
+        self.client.publish(f"{self.topic_prefix}/{self.identity}/status", "online", retain=True)
+
         for d in devices:
             alias = d['alias']
-            safe_alias = alias.replace(' ', '_')
+            
+            # --- CLEANUP LEGACY TOPICS ---
+            # Old node IDs used hyphens/caps and different unique_id schemes
+            old_safe = alias.replace(' ', '_')
+            old_node = f"gk_{self.identity}_{old_safe}"
+            # Clear old device tracker (it used node_id as unique_id)
+            self.client.publish(f"homeassistant/device_tracker/{old_node}/config", "", retain=True)
+            # Clear old sensors (Step 1453 style)
+            for s in ["room", "distance", "rssi"]:
+                self.client.publish(f"homeassistant/sensor/{old_node}_{s}/config", "", retain=True)
+            
+            # --- NEW CLEAN NAMING ---
+            safe_alias = alias.replace(' ', '_').replace('-', '_').lower()
             node_id = f"gk_{self.identity}_{safe_alias}"
             
+            # Additional Cleanup: Clear the lowercased node_id tracker topic (pre-Step 1627)
+            self.client.publish(f"homeassistant/device_tracker/{node_id}/config", "", retain=True)
+            
+            # Tracker Unique ID
             disc_topic = f"homeassistant/device_tracker/{node_id}/config"
             
-            monitor_alias = safe_alias.replace('-', '_').lower()
+            monitor_alias = safe_alias 
             state_topic = f"{self.topic_prefix}/{self.identity}/{monitor_alias}/device_tracker"
             attr_topic = f"{self.topic_prefix}/{self.identity}/{monitor_alias}"
             
             id_type = d.get('identifier_type', 'mac')
             
+            # Device definition for this tracked entity
+            device_info = {
+                "identifiers": [f"device_{node_id}"],
+                "name": alias,
+                "manufacturer": "Gatekeeper",
+                "model": "Generic Tracked Device",
+                "via_device": hub_id
+            }
+
             payload = {
-                "name": f"{alias} ({self.identity})",
-                "unique_id": node_id,
+                "name": "Presence",
+                "unique_id": f"{node_id}_presence",
                 "state_topic": state_topic,
                 "payload_home": "home",
                 "payload_not_home": "not_home",
                 "source_type": "bluetooth",
                 "json_attributes_topic": attr_topic,
-                "icon": "mdi:bluetooth" if id_type == 'mac' else "mdi:identifier-variant"
+                "icon": "mdi:bluetooth" if id_type == 'mac' else "mdi:identifier-variant",
+                "device": device_info
             }
             
+            # 1. Device Tracker Discovery
             self.client.publish(disc_topic, json.dumps(payload), retain=True)
-            self.logger.info(f"Published Discovery for {alias}")
+            
+            # 2. Room Sensor Discovery
+            room_node_id = f"{node_id}_room"
+            room_disc_topic = f"homeassistant/sensor/{room_node_id}/config"
+            room_payload = {
+                "name": "Room",
+                "unique_id": room_node_id,
+                "state_topic": attr_topic,
+                "value_template": "{{ value_json.room }}",
+                "icon": "mdi:room-service",
+                "device": device_info
+            }
+            self.client.publish(room_disc_topic, json.dumps(room_payload), retain=True)
+
+            # 3. Distance Sensor Discovery
+            dist_node_id = f"{node_id}_distance"
+            dist_disc_topic = f"homeassistant/sensor/{dist_node_id}/config"
+            dist_payload = {
+                "name": "Distance",
+                "unique_id": dist_node_id,
+                "state_topic": attr_topic,
+                "value_template": "{{ value_json.distance if value_json.distance != -1 else 'N/A' }}",
+                "unit_of_measurement": "m",
+                "icon": "mdi:ruler",
+                "device": device_info
+            }
+            self.client.publish(dist_disc_topic, json.dumps(dist_payload), retain=True)
+
+            # 4. RSSI Sensor Discovery
+            rssi_node_id = f"{node_id}_rssi"
+            rssi_disc_topic = f"homeassistant/sensor/{rssi_node_id}/config"
+            rssi_payload = {
+                "name": "RSSI",
+                "unique_id": rssi_node_id,
+                "state_topic": attr_topic,
+                "value_template": "{{ value_json.rssi }}",
+                "unit_of_measurement": "dBm",
+                "device_class": "signal_strength",
+                "icon": "mdi:signal",
+                "device": device_info
+            }
+            self.client.publish(rssi_disc_topic, json.dumps(rssi_payload), retain=True)
+
+            self.logger.info(f"Published Discovery (Tracker + 3 Sensors) for {alias}")

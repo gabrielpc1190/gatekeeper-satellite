@@ -84,6 +84,15 @@ class BLEScanner:
         except Exception as e:
             self.logger.debug(f"Adv Parse error: {e}")
 
+    def get_recent_devices(self, seconds=30):
+        """Returns a list of devices seen within the last X seconds."""
+        now = time.time()
+        results = []
+        for mac, data in list(self.discovered_devices.items()):
+            if now - data.get('last_seen', 0) < seconds:
+                results.append(data)
+        return results
+
     def _worker(self):
         self.logger.info("BLE hcidump Worker Started")
         current_packet = ""
