@@ -2,7 +2,7 @@ substitutions:
   name: "gatekeeper-xiao-3"
   wifi_ssid: "GADI_IoT"
   wifi_pass: "01012010"
-  mqtt_broker: "172.16.10.12"
+  mqtt_broker: "172.16.9.20"
 
 esphome:
   name: "${name}"
@@ -13,28 +13,42 @@ esp32:
     type: arduino
 
 wifi:
-  ssid: "${wifi_ssid}"
-  password: "${wifi_pass}"
-  fast_connect: true
+  reboot_timeout: 5min
+  fast_connect: false
+  networks:
+    - ssid: "${wifi_ssid}"
+      password: "${wifi_pass}"
+      manual_ip:
+        static_ip: 172.16.9.123
+        gateway: 172.16.9.1
+        subnet: 255.255.255.0
 
 mqtt:
   id: mqtt_client
   broker: "${mqtt_broker}"
-  username: "gatekeeper_pi" # Optional
-  password: "gatekeeper_pi" # Optional
+  username: "gatekeeper_pi" 
+  password: "gatekeeper_pi" 
   topic_prefix: gatekeeper/satellite/${name}
+  reboot_timeout: 5min
+
+api:
+  password: "gatekeeper_api"
 
 ota:
   - platform: esphome
     password: "gatekeeper_ota"
 
 logger:
+  level: INFO
+
+web_server:
+  port: 80
 
 esp32_ble_tracker:
   scan_parameters:
-    interval: 1100ms
-    window: 1100ms
-    active: true
+    interval: 3000ms
+    window: 100ms
+    active: false
   on_ble_advertise:
     then:
       - lambda: |-
@@ -49,12 +63,12 @@ esp32_ble_tracker:
           if (x.get_ibeacon().has_value()) {
             auto beacon = x.get_ibeacon().value();
             std::string uuid_str = beacon.get_uuid().to_string();
-            sprintf(topic, "uuid/%s", uuid_str.c_str());
+            sprintf(topic, "gatekeeper/satellite/${name}/uuid/%s", uuid_str.c_str());
             sprintf(payload, "{\"rssi\": %d, \"major\": %d, \"minor\": %d}", 
                     x.get_rssi(), beacon.get_major(), beacon.get_minor());
             id_str = uuid_str;     
           } else {
-            sprintf(topic, "%s", x.address_str().c_str());
+            sprintf(topic, "gatekeeper/satellite/${name}/%s", x.address_str().c_str());
             sprintf(payload, "%d", x.get_rssi());
             id_str = x.address_str();
           }
@@ -63,7 +77,7 @@ esp32_ble_tracker:
           bool should_send = false;
           uint32_t now = millis();
           
-          if (last_rssi_map.find(id_str) == last_rssi_map.end()) {
+          if (last_rssi_map.count(id_str) == 0) {
              should_send = true;
           } else {
              int last_rssi = last_rssi_map[id_str];
@@ -72,16 +86,7 @@ esp32_ble_tracker:
           }
 
           if (should_send) {
-             last_rssi_map[id_str] = x.get_rssi();
-             last_send_map[id_str] = now;
-             id(mqtt_client).publish(topic, payload);
+            last_rssi_map[id_str] = x.get_rssi();
+            last_send_map[id_str] = now;
+            id(mqtt_client).publish(topic, payload);
           }
-
-sensor:
-  - platform: wifi_signal
-    name: "${name} WiFi Signal"
-    update_interval: 60s
-  - platform: uptime
-    name: "${name} Uptime"
-    update_interval: 60s
-

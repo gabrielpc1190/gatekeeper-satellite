@@ -7,7 +7,10 @@ Gatekeeper NG is a high-precision, low-latency indoor presence tracking system d
 ## 🏗️ System Architecture
 
 - **Central Hub (Raspberry Pi)**: Processes all signal data, runs the Web Admin UI, and manages Home Assistant integration via MQTT Discovery.
-- **Satellites (ESP32-C3)**: Distributed nodes that scan for Bluetooth signals and report RSSI values to the Hub in real-time.
+- **Satellites (ESP32-based)**:
+  - **ESP32-C3 (Xiao)**: Compact nodes using Seeed XIAO ESP32-C3 boards
+  - **ESP32 WROOM-32**: Standard ESP32 development boards
+  - Distributed nodes that scan for Bluetooth signals and report RSSI values to the Hub in real-time
 - **MQTT Broker**: The communication backbone between satellites and the hub.
 
 ---
@@ -110,4 +113,25 @@ Each device generates:
   ```
 
 ---
+
+## 📝 Changelog
+
+### v1.0.2 - 2025-12-22
+**Fase 1: Correcciones Críticas**
+- ✅ **FIX**: Corregido TypeError en MQTT disconnect callback (Línea 148 de `mqtt_client.py`)
+  - Ajustada firma de `_on_disconnect()` para compatibilidad con Paho MQTT v2.1.0
+  - Sistema ahora realiza shutdown limpio sin errores
+  
+**Fase 2: Estandarización de Configuraciones ESPHome**
+- ✅ **IMPROVE**: Unificados parámetros de BLE scan en `sat2.yaml`
+  - Window scan: 200ms → 1100ms (100% cobertura)
+- ✅ **IMPROVE**: Agregado throttling a `sat3.yaml`
+  - Lógica de 3dB delta + 5s keepalive
+  - Reducción estimada de ~80% en tráfico MQTT
+- ✅ **IMPROVE**: Estandarizado `esp32_sat_2.yaml`
+  - Restaurado `topic_prefix` para consistencia
+  - Agregado throttling (3dB delta + 5s keepalive)
+
+---
 **Gatekeeper NG - High Precision Presence for the Modern Home.**
+

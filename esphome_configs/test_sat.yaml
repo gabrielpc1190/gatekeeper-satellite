@@ -1,0 +1,13 @@
+esphome:
+  name: test-sat
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+wifi:
+  ssid: "test_ssid"
+  password: "test_password"
+
+logger:

@@ -2,7 +2,7 @@ substitutions:
   name: "gatekeeper-esp32-2"
   wifi_ssid: "GADI_IoT"
   wifi_pass: "01012010"
-  mqtt_broker: "172.16.10.12"
+  mqtt_broker: "172.16.9.20"
 
 esphome:
   name: "${name}"
@@ -15,7 +15,10 @@ esp32:
 wifi:
   ssid: "${wifi_ssid}"
   password: "${wifi_pass}"
-  fast_connect: true
+  fast_connect: false
+  reboot_timeout: 5min
+
+captive_portal:
 
 mqtt:
   id: mqtt_client
@@ -23,12 +26,17 @@ mqtt:
   username: "gatekeeper_pi" 
   password: "gatekeeper_pi" 
   topic_prefix: gatekeeper/satellite/${name}
+  reboot_timeout: 5min
+
+web_server:
+  port: 80
 
 ota:
   - platform: esphome
     password: "gatekeeper_ota"
 
 logger:
+  level: INFO
 
 esp32_ble_tracker:
   scan_parameters:
@@ -74,16 +82,6 @@ esp32_ble_tracker:
              last_rssi_map[id_str] = x.get_rssi();
              last_send_map[id_str] = now;
              id(mqtt_client).publish(topic, payload);
-             
-             // Blink LED on activity
-             auto call = id(sat_status_led).turn_on();
-             call.set_transition_length(0);
-             call.set_brightness(1.0);
-             call.perform();
-             delay(10);
-             auto call_off = id(sat_status_led).turn_off();
-             call_off.set_transition_length(0);
-             call_off.perform();
           }
 
 sensor:
