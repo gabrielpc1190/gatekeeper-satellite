@@ -27,12 +27,12 @@ class DeviceTracker:
         # Calibration helper
         self.last_sat_signals = {}
         
-        # Config
+        # Config (Optimized for Low Duty Cycle)
         self.timeout_interval = 45 
         self.min_rssi = -100 
-        self.hysteresis_db = 3.0 
-        self.debounce_time = 3.0 
-        self.absence_timeout = 15.0 
+        self.hysteresis_dist = 0.8 
+        self.debounce_time = 5.0     
+        self.absence_timeout = 60.0  
         
         self.reload_config()
 
@@ -62,49 +62,60 @@ class DeviceTracker:
         await self._check_satellite_registration(satellite_id)
 
     async def process_remote_packet(self, satellite_id, identifier, rssi, extra_data=None):
-        # 1. Update Calibration Cache
+        """Handle packet from remote satellite via MQTT."""
+        # Normalize identifier to avoid case mismatches
+        identifier = identifier.upper()
+        
+        # 1. Update Calibration Cache (Always update with latest for real-time stream)
         now = time.time()
-        if satellite_id not in self.last_sat_signals or (now - self.last_sat_signals[satellite_id]['time']) > 2:
-            self.last_sat_signals[satellite_id] = {'rssi': rssi, 'time': now}
-        else:
-            if rssi > self.last_sat_signals[satellite_id]['rssi']:
-                self.last_sat_signals[satellite_id] = {'rssi': rssi, 'time': now}
+        self.last_sat_signals[satellite_id] = {'rssi': rssi, 'time': now}
 
         # 2. Update Discovery Cache (UI only)
         self._update_discovery_cache(satellite_id, identifier, rssi, extra_data)
             
-        # 3. Manage Satellite Registration 
+        # 3. Manage Satellite Registration (Freshness update)
         await self._check_satellite_registration(satellite_id)
         
         # 4. Filter Unknown Devices
         if identifier not in self.known_devices:
             return
-
-        # 5. Initialize State
-        if identifier not in self.current_state:
-            self.current_state[identifier] = {'present': False, 'sources': {}, 'room': 'unknown', 'rssi': -100, 'distance': -1, 'last_seen': 0}
             
+        # 5. Get/Create Device State
+        if identifier not in self.current_state:
+            self.current_state[identifier] = {
+                'identifier': identifier,
+                'sources': {},
+                'present': False,
+                'room': 'Unknown',
+                'rssi': -100,
+                'distance': -1,
+                'last_seen': 0
+            }
+        
+        state = self.current_state[identifier]
+        
         # 6. Signal Processing Pipeline
+        # Determine room name and reference RSSI
+        actual_room = 'Unassigned'
+        ref_rssi = -65
+        
+        sats = self.config_mgr.load_satellites()
+        if satellite_id in sats:
+            actual_room = sats[satellite_id].get('room', 'Unassigned')
+            ref_rssi = sats[satellite_id].get('ref_rssi_1m', -65)
+        
+        if actual_room == 'Unassigned':
+            actual_room = f"Sat:{satellite_id}"
+            
+        # Signal Smoothing (EMA) via SignalBuffer
         buf_key = (satellite_id, identifier)
         if buf_key not in self.signal_buffers:
             self.signal_buffers[buf_key] = SignalBuffer()
         
         smooth_rssi = self.signal_buffers[buf_key].add_sample(rssi)
+        dist = calculate_distance(smooth_rssi, tx_power=ref_rssi)
         
-        # Apply Calibration & Distance
-        sats = self.config_mgr.load_satellites()
-        sat_info = sats.get(satellite_id, {})
-        measured_ref = sat_info.get('ref_rssi_1m', -59)
-        
-        # Distance calculation
-        dist = calculate_distance(smooth_rssi, tx_power=measured_ref)
-        
-        # Update Source State
-        state = self.current_state[identifier]
-        actual_room = sat_info.get('room', 'Unassigned')
-        if actual_room == 'Unassigned':
-            actual_room = f"Sat:{satellite_id}"
-            
+        # Update Source Details
         state['sources'][satellite_id] = {
             'raw_rssi': rssi,
             'smooth_rssi': smooth_rssi,
@@ -114,7 +125,7 @@ class DeviceTracker:
         }
         state['last_seen'] = now
         
-        # 7. Zoning Logic
+        # 7. Evaluate Zoning
         await self._evaluate_zone(identifier)
 
     async def _evaluate_zone(self, identifier):
@@ -122,12 +133,14 @@ class DeviceTracker:
         now = time.time()
         
         best_sat = None
-        best_rssi = -999
+        min_dist = 999.0
         
+        # 1. Select Best Satellite BASED ON DISTANCE (Lower is closer)
         for sat, data in state['sources'].items():
-            if (now - data['last_seen']) < self.absence_timeout:
-                if data['smooth_rssi'] > best_rssi:
-                    best_rssi = data['smooth_rssi']
+            age = now - data['last_seen']
+            if age < self.absence_timeout:
+                if data['distance'] < min_dist:
+                    min_dist = data['distance']
                     best_sat = sat
         
         if not best_sat: return
@@ -135,6 +148,7 @@ class DeviceTracker:
         candidate_source = state['sources'][best_sat]
         candidate_room = candidate_source['room_name']
         candidate_dist = candidate_source['distance']
+        candidate_rssi = candidate_source['smooth_rssi']
         
         current_room = state.get('room', 'unknown')
         
@@ -142,43 +156,53 @@ class DeviceTracker:
             self.zoning_state[identifier] = {'pending_room': None, 'start': 0}
         z_state = self.zoning_state[identifier]
         
-        if current_room in ['unknown', 'Unassigned'] and candidate_room != 'Unassigned':
-             await self._change_room(identifier, candidate_room, best_rssi, candidate_dist)
+        # Immediate assignment if currently unknown or not at home
+        if current_room in ['unknown', 'Unassigned', 'not_home'] and candidate_room != 'Unassigned':
+             await self._change_room(identifier, candidate_room, candidate_rssi, candidate_dist)
              return
         
-        current_room_rssi = -999
+        # 2. Get current room metrics
+        current_room_min_dist = 999.0
+        current_room_best_rssi = -999.0
         for sat, data in state['sources'].items():
             if (now - data['last_seen']) < self.absence_timeout:
                 if data['room_name'] == current_room:
-                    if data['smooth_rssi'] > current_room_rssi:
-                        current_room_rssi = data['smooth_rssi']
+                    if data['distance'] < current_room_min_dist:
+                        current_room_min_dist = data['distance']
+                        current_room_best_rssi = data['smooth_rssi']
         
-        if current_room_rssi == -999:
-             await self._change_room(identifier, candidate_room, best_rssi, candidate_dist)
+        # If current room lost all satellites (timeout), switch immediately to best available
+        if current_room_min_dist == 999.0:
+             self.logger.info(f"[{identifier}] Current room {current_room} TIMEOUT. Switching to {candidate_room}.")
+             await self._change_room(identifier, candidate_room, candidate_rssi, candidate_dist)
              return
              
-        if best_rssi > (current_room_rssi + self.hysteresis_db):
+        # 3. Decision with Distance Hysteresis
+        # Switch only if the candidate is significantly closer than current room's closest satellite
+        margin = current_room_min_dist - candidate_dist
+        if candidate_dist < (current_room_min_dist - self.hysteresis_dist):
             if z_state['pending_room'] == candidate_room:
-                if (now - z_state['start']) >= self.debounce_time:
-                    await self._change_room(identifier, candidate_room, best_rssi, candidate_dist)
+                elapsed = now - z_state['start']
+                if elapsed >= self.debounce_time:
+                    self.logger.info(f"[{identifier}] DEBOUNCE OK: Switching {current_room} -> {candidate_room} (Margin: {margin:.1f}m)")
+                    await self._change_room(identifier, candidate_room, candidate_rssi, candidate_dist)
                     z_state['pending_room'] = None
             else:
                 z_state['pending_room'] = candidate_room
                 z_state['start'] = now
-        else:
+                self.logger.info(f"[{identifier}] PENDING CHANGE: {current_room} -> {candidate_room} (Margin: {margin:.1f}m, Dist: {candidate_dist:.1f}m)")
+        elif candidate_room == current_room:
+            # If the best satellite IS the current room, reset any pending jump to another room
+            if z_state['pending_room']:
+                self.logger.debug(f"[{identifier}] Resetting pending jump to {z_state['pending_room']} - current is better.")
             z_state['pending_room'] = None
 
+        # Update state with latest metrics from current room if still there
         if state['room'] == current_room:
-            old_rssi = state.get('rssi', -100)
-            state['rssi'] = current_room_rssi
-            best_curr_dist = -1
-            for sat, data in state['sources'].items():
-                 if data['room_name'] == current_room and data['smooth_rssi'] == current_room_rssi:
-                     best_curr_dist = data['distance']
-                     break
-            state['distance'] = best_curr_dist
+            state['rssi'] = current_room_best_rssi
+            state['distance'] = current_room_min_dist
             
-            if abs(old_rssi - current_room_rssi) > 2.0 or (now - state.get('last_pub', 0)) > 30:
+            if (now - state.get('last_pub', 0)) > 30:
                 await self.publish_update(identifier)
 
     async def _change_room(self, identifier, new_room, new_rssi, new_dist):
@@ -225,13 +249,28 @@ class DeviceTracker:
         if not hasattr(self, '_mem_satellites_cache'):
             satellites = self.config_mgr.load_satellites()
             self._mem_satellites_cache = set(satellites.keys())
-        if satellite_id not in self._mem_satellites_cache:
-            satellites = self.config_mgr.load_satellites()
-            if satellite_id not in satellites:
-                satellites[satellite_id] = {'room': 'Unassigned', 'last_seen': time.time()}
-                self.config_mgr.save_satellites(satellites)
-                self.logger.info(f"New Satellite: {satellite_id}")
+        
+        # Load fresh to check/update
+        # Optimization: We could keep 'satellites' in memory but ConfigMgr loads from disk.
+        # For now, let's load-check-save pattern but throttled.
+        
+        should_save = False
+        satellites = self.config_mgr.load_satellites()
+        
+        if satellite_id not in satellites:
+            satellites[satellite_id] = {'room': 'Unassigned', 'last_seen': time.time()}
+            should_save = True
+            self.logger.info(f"New Satellite: {satellite_id}")
             self._mem_satellites_cache.add(satellite_id)
+        else:
+            # Check if we need to update timestamp (throttle to every 60s)
+            last = satellites[satellite_id].get('last_seen', 0)
+            if (time.time() - last) > 60:
+                satellites[satellite_id]['last_seen'] = time.time()
+                should_save = True
+        
+        if should_save:
+            self.config_mgr.save_satellites(satellites)
 
     async def publish_update(self, identifier):
         if identifier not in self.known_devices or identifier not in self.current_state: return
