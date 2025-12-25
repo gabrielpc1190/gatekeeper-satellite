@@ -1,0 +1,41 @@
+{
+    "gatekeeper-xiao-1": {
+        "room": "Master",
+        "last_seen": 1766705377.3958797,
+        "x": 0.0,
+        "y": 0.0,
+        "ref_rssi_1m": -51
+    },
+    "gatekeeper-xiao-3": {
+        "room": "Oficina",
+        "last_seen": 1766705399.1834552,
+        "x": 0.0,
+        "y": 0.0,
+        "ref_rssi_1m": -57
+    },
+    "gatekeeper-xiao-2": {
+        "room": "Dormitorio Visitas",
+        "last_seen": 1766705396.405996,
+        "x": 0.0,
+        "y": 0.0,
+        "ref_rssi_1m": -58
+    },
+    "gatekeeper-hub": {
+        "room": "SalaTV-Cocina",
+        "last_seen": 1766705431.0602813,
+        "ref_rssi_1m": -48,
+        "x": 0.0,
+        "y": 0.0
+    },
+    "gatekeeper-esp32-1": {
+        "room": "CuartoElectrico",
+        "last_seen": 1766686994.5020852,
+        "x": 0.0,
+        "y": 0.0
+    },
+    "gatekeeper-esp32-2": {
+        "room": "Unassigned",
+        "last_seen": 1766705334.0075364,
+        "ref_rssi_1m": -75
+    }
+}
