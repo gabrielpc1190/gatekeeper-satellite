@@ -39,6 +39,7 @@ class WebAdmin:
         self.app.add_url_rule('/satellites/update', 'update_satellite', self.update_satellite, methods=['POST'])
         self.app.add_url_rule('/satellites/calibrate', 'calibrate_satellite', self.calibrate_satellite, methods=['GET'])
         self.app.add_url_rule('/satellites/update_ref', 'update_satellite_ref', self.update_satellite_ref, methods=['POST'])
+        self.app.add_url_rule('/api/satellites', 'api_satellites', self.api_satellites)
         self.app.add_url_rule('/logs', 'view_logs', self.view_logs)
         self.app.add_url_rule('/restart', 'restart_service', self.restart_service, methods=['POST'])
 
@@ -402,7 +403,23 @@ class WebAdmin:
             # Add health stats if available
             stats = self.tracker.satellite_stats.get(sid, {})
             info['wifi_signal'] = stats.get('wifi_signal', '--')
-            info['uptime'] = stats.get('uptime', '--')
+            info['wifi_signal'] = stats.get('wifi_signal', '--')
+            
+            raw_uptime = stats.get('uptime', 0)
+            info['uptime'] = raw_uptime
+            
+            try:
+                up_sec = float(raw_uptime)
+                if up_sec < 60:
+                    info['uptime_fmt'] = f"{int(up_sec)}s"
+                elif up_sec < 3600:
+                    info['uptime_fmt'] = f"{int(up_sec/60)}m"
+                elif up_sec < 86400:
+                    info['uptime_fmt'] = f"{int(up_sec/3600)}h {int((up_sec%3600)/60)}m"
+                else:
+                    info['uptime_fmt'] = f"{int(up_sec/86400)}d {int((up_sec%86400)/3600)}h"
+            except (ValueError, TypeError):
+                info['uptime_fmt'] = "--"
             
             last = info.get('last_seen', 0)
             diff = int(now - last)
@@ -414,6 +431,43 @@ class WebAdmin:
                 info['last_seen_fmt'] = f"{diff//3600}h ago"
                 
         return render_template('satellites.html', satellites=satellites)
+
+    def api_satellites(self):
+        """API Endpoint for Real-time Satellite Stats"""
+        satellites = self.config_mgr.load_satellites()
+        now = time.time()
+        results = {}
+        
+        for sid, info in satellites.items():
+            # Get fresh stats from memory
+            stats = self.tracker.satellite_stats.get(sid, {})
+            
+            # Format Uptime
+            raw_uptime = stats.get('uptime', 0)
+            uptime_fmt = "--"
+            try:
+                up_sec = float(raw_uptime)
+                if up_sec < 60: uptime_fmt = f"{int(up_sec)}s"
+                elif up_sec < 3600: uptime_fmt = f"{int(up_sec/60)}m"
+                elif up_sec < 86400: uptime_fmt = f"{int(up_sec/3600)}h {int((up_sec%3600)/60)}m"
+                else: uptime_fmt = f"{int(up_sec/86400)}d {int((up_sec%86400)/3600)}h"
+            except: pass
+            
+            # Format Last Seen
+            last = info.get('last_seen', 0)
+            diff = int(now - last)
+            if diff < 60: last_seen_fmt = f"Just now ({diff}s ago)"
+            elif diff < 3600: last_seen_fmt = f"{diff//60}m ago"
+            else: last_seen_fmt = f"{diff//3600}h ago"
+            
+            results[sid] = {
+                'wifi_signal': stats.get('wifi_signal', '--'),
+                'uptime_fmt': uptime_fmt,
+                'last_seen_fmt': last_seen_fmt,
+                'is_online': diff < 60 # Flag for UI highlighting
+            }
+            
+        return json.dumps(results)
 
     def update_satellite(self):
         sats = self.config_mgr.load_satellites()
@@ -484,7 +538,8 @@ class WebAdmin:
             last_rssi = None
             if self.tracker:
                 sig_data = getattr(self.tracker, 'last_sat_signals', {}).get(sid)
-                if sig_data and (now - sig_data['time']) < 3:
+                # Allow data up to 10s old (Satellite keepalive is 5s)
+                if sig_data and (now - sig_data['time']) < 10:
                     last_rssi = sig_data['rssi']
                     session['readings'].append(last_rssi)
 

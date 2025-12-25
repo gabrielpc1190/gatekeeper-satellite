@@ -40,7 +40,7 @@
                         <td style="padding: 1rem;">
                             <div style="font-family: monospace; color: var(--accent); font-weight: 600;">{{ sat_id }}
                             </div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Last seen: {{
+                            <div id="last-seen-{{ sat_id }}" style="font-size: 0.8rem; color: var(--text-secondary);">Last seen: {{
                                 info.last_seen_fmt }}</div>
                         </td>
                         <td style="padding: 1rem;">
@@ -49,13 +49,13 @@
                                 style="width: 140px; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text-primary);">
                         </td>
                         <td style="padding: 1rem;">
-                            <div style="color: var(--text-secondary); font-size: 0.9rem;">
+                            <div id="wifi-{{ sat_id }}" style="color: var(--text-secondary); font-size: 0.9rem;">
                                 {{ info.wifi_signal }} <small>dBm</small>
                             </div>
                         </td>
                         <td style="padding: 1rem;">
-                            <div style="color: var(--text-secondary); font-size: 0.8rem; font-family: monospace;">
-                                {{ info.uptime }} <small>s</small>
+                            <div id="uptime-{{ sat_id }}" style="color: var(--text-secondary); font-size: 0.8rem; font-family: monospace;">
+                                {{ info.uptime_fmt }}
                             </div>
                         </td>
                         <td style="padding: 1rem;">
@@ -251,5 +251,34 @@
         document.getElementById('finalRssi').innerText = Math.round(avg) + ' dBm';
         document.getElementById('calibVal').value = Math.round(avg);
     }
+
+    // Live Updates Polling
+    setInterval(() => {
+        fetch('/api/satellites')
+            .then(r => r.json())
+            .then(data => {
+                for (const [sid, stats] of Object.entries(data)) {
+                    // Update WiFi
+                    const wifiEl = document.getElementById(`wifi-${sid}`);
+                    if (wifiEl) wifiEl.innerHTML = `${stats.wifi_signal} <small>dBm</small>`;
+                    
+                    // Update Uptime
+                    const uptimeEl = document.getElementById(`uptime-${sid}`);
+                    if (uptimeEl) uptimeEl.innerText = stats.uptime_fmt;
+                    
+                    // Update Last Seen
+                    const seenEl = document.getElementById(`last-seen-${sid}`);
+                    if (seenEl) seenEl.innerText = `Last seen: ${stats.last_seen_fmt}`;
+                    
+                    // Optional: Visual indicator for offline/online
+                    if (!stats.is_online) {
+                        if (wifiEl) wifiEl.style.color = 'var(--error)';
+                    } else {
+                        if (wifiEl) wifiEl.style.color = 'var(--text-secondary)';
+                    }
+                }
+            })
+            .catch(e => console.log('Polling error', e));
+    }, 2000); // 2 seconds
 </script>
 {% endblock %}
